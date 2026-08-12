@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-12T00:00:00.000Z",
+  "title": "Design System: TripForge",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "neutral", "displayName": "Route Ink", "canonical": "#10263c", "tonalRamp": ["#10263c", "#29445a", "#526a7a", "#82939d", "#b1bdc4", "#d3dadd", "#e9edef", "#f6f8f8"] },
+      "route-blue": { "role": "neutral", "displayName": "Wayfinding Blue", "canonical": "#102b43", "tonalRamp": ["#102b43", "#24455d", "#496a7d", "#7694a1", "#a7bdc5", "#cbd8dc", "#e4ebed", "#f5f8f8"] },
+      "map-paper": { "role": "neutral", "displayName": "Map Paper", "canonical": "#f5f0e6", "tonalRamp": ["#584f40", "#786c59", "#9d9079", "#beb39f", "#d9d0c0", "#e7e0d3", "#f0ebe2", "#faf8f3"] },
+      "departure-citron": { "role": "primary", "displayName": "Departure Citron", "canonical": "#d9ee36", "tonalRamp": ["#354008", "#596b12", "#819923", "#abc634", "#d9ee36", "#e5f363", "#eef991", "#f7fdc9"] }
+    },
+    "typographyMeta": { "display": { "displayName": "Route Statement", "purpose": "Hero and major landing-page statements." }, "label": { "displayName": "Wayfinding Label", "purpose": "Operational metadata and route status." } },
+    "shadows": [ { "name": "route-board-offset", "value": "18px 18px 0 #e7decd", "purpose": "Flat paper-backed depth for planning evidence." }, { "name": "auth-dock", "value": "0 23px 70px rgba(16,38,60,.28)", "purpose": "Focused email sign-in handoff." } ],
+    "motion": [ { "name": "route-dash", "value": "15s linear infinite", "purpose": "Slow route movement on the map board." }, { "name": "reveal", "value": "0.7s cubic-bezier(.22,1,.36,1)", "purpose": "Scroll-entry reveal, disabled with reduced motion." } ],
+    "breakpoints": [ { "name": "tablet", "value": "900px" }, { "name": "mobile", "value": "600px" } ]
+  },
+  "components": [
+    { "name": "Departure Button", "kind": "button", "refersTo": "button-primary", "description": "The one decisive forward action.", "html": "<button class=\"ds-depart\">Start planning <span>→</span></button>", "css": ".ds-depart { background:#d9ee36; color:#10263c; border:0; border-radius:18px; padding:0 18px; height:52px; font:700 14px Arial,sans-serif; transition:transform .25s ease,background .25s ease; } .ds-depart:hover { background:#cce333; transform:translateY(-2px); } .ds-depart:focus-visible { outline:3px solid #264f75; outline-offset:3px; }" },
+    { "name": "Trip Input", "kind": "input", "refersTo": "input-trip", "description": "A traveler begins with one plain sentence.", "html": "<label class=\"ds-trip\">Where would you like to go?<input placeholder=\"7 days in Pakistan for two\" /></label>", "css": ".ds-trip { display:grid; gap:8px; color:#10263c; font:700 12px Arial,sans-serif; } .ds-trip input { height:70px; background:#fffdf8; border:1px solid #a7afae; border-radius:24px; padding:0 18px; color:#10263c; font:14px Arial,sans-serif; } .ds-trip input:focus-visible { outline:3px solid #264f75; outline-offset:3px; }" },
+    { "name": "Sign-in Pill", "kind": "button", "refersTo": "button-secondary", "description": "A compact quiet navigation action.", "html": "<button class=\"ds-signin\">Sign in</button>", "css": ".ds-signin { background:transparent; color:#10263c; border:1px solid #aab5bb; border-radius:999px; padding:10px 18px; font:14px Arial,sans-serif; transition:background .25s ease,color .25s ease; } .ds-signin:hover { background:#10263c; color:#fff; } .ds-signin:focus-visible { outline:3px solid #264f75; outline-offset:3px; }" }
+  ],
+  "narrative": { "northStar": "The Route Room", "overview": "TripForge uses a light wayfinding system to make coordinated travel planning feel physical, inspectable, and calm.", "keyCharacteristics": ["Light map-paper surfaces", "Ink-blue operational proof", "Citron as a departure signal"], "rules": [ { "name": "The Departure Signal Rule", "body": "Citron is a stateful signal, not general decoration.", "section": "colors" } ], "dos": ["Do use real route geometry.", "Do retain reduced-motion support."], "donts": ["Don't use dark theme backgrounds.", "Don't represent synthetic planning information as real availability."] }
+}

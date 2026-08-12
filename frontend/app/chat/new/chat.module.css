@@ -1,0 +1,753 @@
+.page {
+  min-height: 100svh;
+  height: 100svh;
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
+  overflow: hidden;
+  background: #f8f5ee;
+  color: #10263c;
+}
+
+.sidebar {
+  position: relative;
+  z-index: 20;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px 18px;
+  border-right: 1px solid #d8ded7;
+  background: #f1ede4;
+}
+
+.sidebarTop {
+  display: grid;
+  gap: 30px;
+}
+
+.brand {
+  width: fit-content;
+  color: #10263c;
+  text-decoration: none;
+  font-size: 1.28rem;
+  font-weight: 760;
+  letter-spacing: -.04em;
+}
+
+.brand span {
+  font-weight: 400;
+}
+
+.newTrip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid #c8d1ca;
+  border-radius: 14px;
+  background: #fffefa;
+  color: #10263c;
+  font: inherit;
+  font-weight: 680;
+  cursor: pointer;
+  transition: border-color .2s ease, background-color .2s ease, transform .2s ease;
+}
+
+.newTrip {
+  width: 100%;
+  height: 48px;
+}
+
+.newTrip:hover {
+  border-color: #82958d;
+  background: #fff;
+  transform: translateY(-1px);
+}
+
+.newTrip svg,
+.menuButton svg,
+.composer button svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tripLibrary {
+  min-height: 0;
+  flex: 1;
+  padding-top: 38px;
+}
+
+.tripLibrary h2 {
+  margin: 0 10px 16px;
+  color: #66776f;
+  font-size: .75rem;
+  font-weight: 650;
+}
+
+.tripLibrary ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tripLibrary li button {
+  width: 100%;
+  padding: 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #10263c;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noTrips {
+  padding: 18px 10px;
+  color: #6b7b74;
+}
+
+.noTrips .routeMark {
+  width: 48px;
+  height: 38px;
+  margin-bottom: 12px;
+}
+
+.noTrips p {
+  margin: 0 0 4px;
+  color: #294259;
+  font-size: .86rem;
+  font-weight: 650;
+}
+
+.noTrips small {
+  font-size: .76rem;
+  line-height: 1.45;
+}
+
+.account {
+  position: relative;
+  padding-top: 18px;
+  border-top: 1px solid #d8ded7;
+}
+
+.accountTrigger {
+  width: 100%;
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 24px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: #10263c;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .2s ease;
+}
+
+.accountTrigger:hover,
+.accountTrigger[aria-expanded="true"] {
+  background: #e7e3da;
+}
+
+.accountTrigger:focus-visible {
+  outline: 3px solid #294f6f;
+  outline-offset: 2px;
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #102b43;
+  color: #fffefa;
+  font-size: .82rem;
+  font-weight: 720;
+}
+
+.accountText {
+  min-width: 0;
+  display: grid;
+}
+
+.accountText strong,
+.accountText small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountText strong {
+  font-size: .8rem;
+  font-weight: 680;
+}
+
+.accountText small {
+  margin-top: 2px;
+  color: #708078;
+  font-size: .67rem;
+}
+
+.chevron {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: #62736b;
+  transition: transform .2s ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.chevron svg,
+.accountMenu svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.accountMenu {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 10px);
+  left: 0;
+  padding: 8px;
+  border-radius: 16px;
+  background: #fffefa;
+  box-shadow: 0 18px 44px rgba(16, 38, 60, .16);
+  animation: accountMenuIn .22s both cubic-bezier(.22, 1, .36, 1);
+}
+
+.accountDetails {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+}
+
+.accountDetails > span:last-child {
+  min-width: 0;
+  display: grid;
+}
+
+.accountDetails strong,
+.accountDetails small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountDetails strong {
+  font-size: .8rem;
+}
+
+.accountDetails small {
+  margin-top: 3px;
+  color: #6b7b74;
+  font-size: .68rem;
+}
+
+.menuIcon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #edf0e9;
+  color: #294f6f;
+}
+
+.accountMenu form {
+  padding-top: 7px;
+  border-top: 1px solid #e2e5df;
+}
+
+.accountMenu form button {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #8e3e31;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.accountMenu form button:hover {
+  background: #f7ebe7;
+}
+
+.accountMenu form button:focus-visible {
+  outline: 3px solid #294f6f;
+  outline-offset: 1px;
+}
+
+.workspace {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 72px minmax(0, 1fr) auto;
+  background: #fbf9f4;
+}
+
+.workspaceHeader {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(22px, 4vw, 54px);
+  border-bottom: 1px solid #e0e4de;
+  background: rgba(251, 249, 244, .96);
+}
+
+.workspaceHeader > div {
+  display: grid;
+  gap: 3px;
+}
+
+.workspaceHeader strong {
+  font-size: .88rem;
+  font-weight: 680;
+}
+
+.workspaceHeader span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6c7c74;
+  font-size: .7rem;
+}
+
+.workspaceHeader i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8ca230;
+}
+
+.menuButton {
+  display: none;
+}
+
+.thread {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 56px clamp(24px, 7vw, 96px) 36px;
+  scrollbar-color: #c5cec7 transparent;
+}
+
+.threadEmpty {
+  display: grid;
+  place-items: center;
+  padding-bottom: 20px;
+}
+
+.welcome {
+  width: min(680px, 100%);
+  text-align: center;
+  animation: welcomeIn .55s both cubic-bezier(.22, 1, .36, 1);
+}
+
+.routeMark {
+  width: 82px;
+  height: 64px;
+  overflow: visible;
+  fill: #d9ee36;
+  stroke: #294f6f;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.routeMark path:first-child {
+  fill: none;
+  stroke-dasharray: 5 6;
+}
+
+.routeMark path:nth-child(2) {
+  fill: none;
+}
+
+.welcome h1 {
+  margin: 20px 0 12px;
+  font-size: clamp(2.7rem, 6vw, 5.2rem);
+  font-weight: 630;
+  line-height: .96;
+  letter-spacing: -.04em;
+  text-wrap: balance;
+}
+
+.welcome > p {
+  max-width: 500px;
+  margin: 0 auto;
+  color: #65766f;
+  font-size: .98rem;
+  line-height: 1.6;
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 30px;
+}
+
+.suggestions button {
+  min-height: 40px;
+  padding: 0 15px;
+  border: 1px solid #d0d8d1;
+  border-radius: 999px;
+  background: transparent;
+  color: #395268;
+  font: inherit;
+  font-size: .78rem;
+  cursor: pointer;
+  transition: border-color .2s ease, background-color .2s ease, transform .2s ease;
+}
+
+.suggestions button:hover {
+  border-color: #91a198;
+  background: #fffefa;
+  transform: translateY(-1px);
+}
+
+.messages {
+  width: min(780px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 34px;
+}
+
+.travelerMessage,
+.assistantMessage {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  animation: messageIn .38s both cubic-bezier(.22, 1, .36, 1);
+}
+
+.travelerMessage {
+  justify-content: flex-end;
+}
+
+.travelerMessage > div {
+  max-width: min(620px, 86%);
+  padding: 15px 18px;
+  border-radius: 16px 16px 4px 16px;
+  background: #e7e4dc;
+}
+
+.assistantMessage > div {
+  max-width: 650px;
+  padding-top: 3px;
+}
+
+.assistantMark {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #102b43;
+  color: #d9ee36;
+  font-size: .65rem;
+  font-weight: 760;
+  letter-spacing: -.02em;
+}
+
+.travelerMessage span,
+.assistantMessage div > span {
+  display: block;
+  margin-bottom: 5px;
+  color: #65766f;
+  font-size: .67rem;
+  font-weight: 650;
+}
+
+.travelerMessage p,
+.assistantMessage p {
+  margin: 0;
+  font-size: .94rem;
+  line-height: 1.62;
+  white-space: pre-wrap;
+}
+
+.composerWrap {
+  position: relative;
+  z-index: 4;
+  padding: 16px clamp(24px, 7vw, 96px) 22px;
+  background: #fbf9f4;
+}
+
+.composer {
+  position: relative;
+  width: min(780px, 100%);
+  min-height: 68px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  align-items: end;
+  gap: 12px;
+  padding: 10px 10px 10px 18px;
+  border-radius: 18px;
+  background: #fffefa;
+  box-shadow: 0 14px 38px rgba(16, 38, 60, .12);
+}
+
+.composer label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.composer textarea {
+  width: 100%;
+  max-height: 150px;
+  min-height: 46px;
+  padding: 12px 2px 9px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #10263c;
+  font: inherit;
+  font-size: .9rem;
+  line-height: 1.5;
+}
+
+.composer textarea::placeholder {
+  color: #687a72;
+  opacity: 1;
+}
+
+.composer:focus-within {
+  outline: 3px solid #294f6f;
+  outline-offset: 2px;
+}
+
+.composer button {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 14px;
+  background: #d9ee36;
+  color: #10263c;
+  cursor: pointer;
+  transition: background-color .2s ease, transform .2s ease, opacity .2s ease;
+}
+
+.composer button:hover:not(:disabled) {
+  background: #d0e735;
+  transform: translateY(-1px);
+}
+
+.composer button:disabled {
+  cursor: not-allowed;
+  opacity: .4;
+}
+
+.composerWrap > p {
+  width: min(780px, 100%);
+  margin: 8px auto 0;
+  color: #718078;
+  text-align: center;
+  font-size: .66rem;
+}
+
+.scrim {
+  display: none;
+}
+
+@keyframes welcomeIn {
+  from { opacity: .5; transform: translateY(16px); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes messageIn {
+  from { opacity: .55; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes accountMenuIn {
+  from { opacity: .6; transform: translateY(8px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 840px) {
+  .page {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(310px, 86vw);
+    transform: translateX(-102%);
+    box-shadow: 18px 0 48px rgba(16, 38, 60, .16);
+    transition: transform .32s cubic-bezier(.22, 1, .36, 1);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .scrim {
+    position: fixed;
+    z-index: 15;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgba(16, 38, 60, .22);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+  }
+
+  .scrimVisible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .menuButton {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: #10263c;
+  }
+
+  .workspaceHeader {
+    padding: 0 16px;
+  }
+
+  .workspaceHeader > div {
+    margin-right: auto;
+    margin-left: 8px;
+  }
+
+  .thread {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .composerWrap {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .workspace {
+    grid-template-rows: 64px minmax(0, 1fr) auto;
+  }
+
+  .workspaceHeader span {
+    display: none;
+  }
+
+  .thread {
+    padding-top: 34px;
+    padding-bottom: 24px;
+  }
+
+  .welcome h1 {
+    font-size: clamp(2.65rem, 13vw, 4rem);
+  }
+
+  .welcome > p {
+    max-width: 330px;
+    font-size: .9rem;
+  }
+
+  .suggestions {
+    max-width: 350px;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .messages {
+    gap: 28px;
+  }
+
+  .travelerMessage > div {
+    max-width: 92%;
+  }
+
+  .composerWrap {
+    padding-top: 10px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .composer {
+    min-height: 60px;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    padding: 8px 8px 8px 14px;
+    border-radius: 16px;
+  }
+
+  .composer button {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+  }
+
+  .composerWrap > p {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome,
+  .travelerMessage,
+  .assistantMessage {
+    animation: none;
+  }
+
+  .sidebar,
+  .scrim,
+  .newTrip,
+  .accountTrigger,
+  .chevron,
+  .suggestions button,
+  .composer button {
+    transition: none;
+  }
+
+  .accountMenu {
+    animation: none;
+  }
+}
