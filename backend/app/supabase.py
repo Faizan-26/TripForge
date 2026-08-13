@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -150,6 +151,12 @@ class SupabaseGateway:
         )
         trigger_message_id = messages[0]["id"]
         await self._request(
+            "PATCH",
+            "conversations",
+            params={"id": f"eq.{conversation_id}"},
+            json={"last_message_at": datetime.now(UTC).isoformat()},
+        )
+        await self._request(
             "POST",
             "agent_runs",
             json={
@@ -246,6 +253,12 @@ class SupabaseGateway:
                 ),
                 "metadata": {"run_id": str(run_id), "artifact_kind": kind},
             },
+        )
+        await self._request(
+            "PATCH",
+            "conversations",
+            params={"id": f"eq.{conversation_id}"},
+            json={"last_message_at": datetime.now(UTC).isoformat()},
         )
 
     async def owns_run(self, *, user_id: UUID, run_id: UUID) -> bool:

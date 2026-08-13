@@ -2,21 +2,16 @@
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ClarificationForm } from "@/features/trip-planner/ClarificationForm";
 import { PlanningProgress } from "@/features/trip-planner/PlanningProgress";
 import { TripPlanView } from "@/features/trip-planner/TripPlanView";
 import { useTripPlanner } from "@/features/trip-planner/use-trip-planner";
 import { clearTripDraft, TRIP_DRAFT_KEY } from "@/lib/auth/pending-auth";
 import { useSessionStorage } from "@/lib/browser/use-session-storage";
+import type { ConversationDetail, ConversationSummary } from "@/lib/trip-api/types";
 import { signOut } from "./actions";
 import styles from "./chat.module.css";
-
-type Project = {
-  id: string;
-  title: string;
-};
-
-const projects: Project[] = [];
 
 function MenuIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>;
@@ -51,8 +46,17 @@ function RouteMark() {
   </svg>;
 }
 
-export function ChatWorkspace({ email }: { email: string }) {
+export function ChatWorkspace({
+  email,
+  initialConversation,
+  initialConversations,
+}: {
+  email: string;
+  initialConversation?: ConversationDetail;
+  initialConversations: ConversationSummary[];
+}) {
   const draft = useSessionStorage(TRIP_DRAFT_KEY);
+  const router = useRouter();
   const initialized = useRef(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const [idea, setIdea] = useState("");
@@ -61,6 +65,8 @@ export function ChatWorkspace({ email }: { email: string }) {
   const threadEndRef = useRef<HTMLDivElement>(null);
   const {
     messages,
+    conversationId,
+    conversations,
     status,
     events,
     clarification,
@@ -70,7 +76,7 @@ export function ChatWorkspace({ email }: { email: string }) {
     startRun,
     answerClarification,
     reset,
-  } = useTripPlanner();
+  } = useTripPlanner(initialConversation, initialConversations);
 
   useEffect(() => {
     if (!draft || initialized.current) return;
@@ -125,6 +131,7 @@ export function ChatWorkspace({ email }: { email: string }) {
     reset();
     setIdea("");
     setSidebarOpen(false);
+    router.push("/chat/new");
   }
 
   const initial = email === "Traveler" ? "T" : email.charAt(0).toUpperCase();
@@ -148,7 +155,12 @@ export function ChatWorkspace({ email }: { email: string }) {
 
       <section className={styles.tripLibrary} aria-labelledby="trips-heading">
         <h2 id="trips-heading">Your trips</h2>
-        {projects.length > 0 ? <ul>{projects.map((project) => <li key={project.id}><button type="button">{project.title}</button></li>)}</ul> : <div className={styles.noTrips}><RouteMark /><p>No saved trips yet</p><small>Your conversations will appear here.</small></div>}
+        {conversations.length > 0 ? <ul>{conversations.map((conversation) => <li key={conversation.id}>
+          <Link className={conversation.id === conversationId ? styles.tripActive : ""} href={`/chat/${conversation.id}`} onClick={() => setSidebarOpen(false)} aria-current={conversation.id === conversationId ? "page" : undefined}>
+            <span>{conversation.title}</span>
+            <small>{conversation.last_message_at ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(conversation.last_message_at)) : "New"}</small>
+          </Link>
+        </li>)}</ul> : <div className={styles.noTrips}><RouteMark /><p>No saved trips yet</p><small>Your conversations will appear here.</small></div>}
       </section>
 
       <div className={styles.account} ref={accountMenuRef}>
@@ -172,7 +184,7 @@ export function ChatWorkspace({ email }: { email: string }) {
     <section className={styles.workspace}>
       <header className={styles.workspaceHeader}>
         <button className={styles.menuButton} type="button" onClick={() => setSidebarOpen(true)} aria-label="Open trip menu"><MenuIcon /></button>
-        <div><strong>{plan?.requirements.destination ?? "New trip"}</strong><span><i className={busy ? styles.statusBusy : ""} /> {statusText}</span></div>
+        <div><strong>{conversations.find((item) => item.id === conversationId)?.title ?? plan?.requirements.destination ?? "New trip"}</strong><span><i className={busy ? styles.statusBusy : ""} /> {statusText}</span></div>
       </header>
 
       <div className={`${styles.thread} ${messages.length === 0 ? styles.threadEmpty : ""}`}>
@@ -188,11 +200,11 @@ export function ChatWorkspace({ email }: { email: string }) {
         </div> : <div className={styles.messages} aria-live="polite">
           {messages.map((message) => <article className={message.role === "traveler" ? styles.travelerMessage : styles.assistantMessage} key={message.id}>
             {message.role === "assistant" && <span className={styles.assistantMark}>TF</span>}
-            <div><span>{message.role === "traveler" ? "You" : "TripForge"}</span><p>{message.content}</p></div>
+            <div><span>{message.role === "traveler" ? "You" : "TripForge"}</span><p>{message.content}</p>{message.artifact && "itinerary" in message.artifact && <TripPlanView plan={message.artifact} />}</div>
           </article>)}
           <PlanningProgress events={events} status={status} />
           {clarification && <ClarificationForm clarification={clarification} disabled={busy} onSubmit={answerClarification} />}
-          {plan && <TripPlanView plan={plan} />}
+          {plan && !messages.some((message) => message.artifact === plan) && <TripPlanView plan={plan} />}
           {error && <section className={styles.runError} role="alert"><strong>Planning paused</strong><p>{error}</p><button type="button" onClick={() => reset()}>Start again</button></section>}
           <div ref={threadEndRef} />
         </div>}

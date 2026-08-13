@@ -175,10 +175,68 @@ export type RunEvent = {
   data: Record<string, unknown>;
 };
 
-export function isClarificationResult(value: RunResult | null | undefined): value is ClarificationResult {
-  return Boolean(value && "questions" in value && Array.isArray(value.questions));
+export type ConversationSummary = {
+  id: string;
+  title: string;
+  status: string;
+  last_message_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConversationMessage = {
+  id: number;
+  public_id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  status: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ConversationRun = {
+  id: string;
+  trigger_message_id?: number | null;
+  parent_run_id?: string | null;
+  status: RunStatus;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConversationArtifact = {
+  id: string;
+  run_id?: string | null;
+  kind: string;
+  version: number;
+  status: string;
+  is_current: boolean;
+  title?: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ConversationDetail = {
+  conversation: ConversationSummary;
+  messages: ConversationMessage[];
+  runs: ConversationRun[];
+  artifacts: ConversationArtifact[];
+};
+
+export function isClarificationResult(value: unknown): value is ClarificationResult {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "questions" in value
+    && Array.isArray(value.questions),
+  );
 }
 
-export function isTripPlan(value: RunResult | null | undefined): value is TripPlan {
-  return Boolean(value && "itinerary" in value && "budget" in value);
+export function isTripPlan(value: unknown): value is TripPlan {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "itinerary" in value
+    && "budget" in value,
+  );
 }

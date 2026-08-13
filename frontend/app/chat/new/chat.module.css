@@ -94,17 +94,41 @@
   list-style: none;
 }
 
-.tripLibrary li button {
+.tripLibrary li a {
   width: 100%;
+  min-height: 50px;
   padding: 12px;
   overflow: hidden;
-  border: 0;
   border-radius: 12px;
-  background: transparent;
   color: #10263c;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
   text-align: left;
+  text-decoration: none;
+  transition: background-color .2s ease;
+}
+
+.tripLibrary li a:hover {
+  background: #e7e3da;
+}
+
+.tripLibrary li .tripActive {
+  background: #e7decd;
+}
+
+.tripLibrary li a > span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: .78rem;
+  font-weight: 650;
+}
+
+.tripLibrary li a > small {
+  color: #647484;
+  font-size: .65rem;
 }
 
 .noTrips {
@@ -466,6 +490,10 @@
 .assistantMessage > div {
   max-width: 650px;
   padding-top: 3px;
+}
+
+.assistantMessage > div > .plan {
+  margin-top: 28px;
 }
 
 .assistantMark {

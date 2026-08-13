@@ -14,9 +14,9 @@ BACKEND_API_URL=http://127.0.0.1:8000
 
 Start FastAPI first, then Next.js. The planning workspace supports run creation,
 authenticated SSE progress, clarification answers, final itinerary and budget rendering,
-Google Maps links, and recoverable errors. The current backend OpenAPI contract does not
-yet expose conversation/message list endpoints, so the saved-trip sidebar remains an
-honest empty state until those endpoints are added.
+Google Maps links, and recoverable errors. Conversation lists, messages, runs, and
+artifacts are loaded by authenticated Server Components directly from Supabase under
+the existing RLS policies; FastAPI remains focused on agent execution and SSE.
 
 ## Getting Started
 
