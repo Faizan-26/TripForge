@@ -1,5 +1,23 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## TripForge API integration
+
+Create `frontend/.env` from `.env.example`. The browser talks to same-origin Next.js
+route handlers, which read the Supabase cookie session and forward its access token to
+FastAPI. Keep `BACKEND_API_URL` server-only; it must not use a `NEXT_PUBLIC_` prefix.
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
+BACKEND_API_URL=http://127.0.0.1:8000
+```
+
+Start FastAPI first, then Next.js. The planning workspace supports run creation,
+authenticated SSE progress, clarification answers, final itinerary and budget rendering,
+Google Maps links, and recoverable errors. Conversation lists, messages, runs, and
+artifacts are loaded by authenticated Server Components directly from Supabase under
+the existing RLS policies; FastAPI remains focused on agent execution and SSE.
+
 ## Getting Started
 
 First, run the development server:
