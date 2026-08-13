@@ -3,6 +3,8 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.budget import BudgetEngine
 from app.agents.compatibility import CompatibilityLayer
 from app.agents.itinerary import ItineraryAgent
+from app.agents.general import GeneralAssistantAgent
+from app.agents.hotel_search import HotelSearchAgent
 from app.agents.research import ActivityAgent, StayAgent, TravelInfoAgent
 from app.agents.scope import TripScopeAgent
 from app.agents.supervisor import SupervisorAgent
@@ -11,6 +13,7 @@ from app.core.config import Settings
 from app.graph.state import TripState
 from app.llm.base import PlanningModel
 from app.tools.google_maps import GoogleMapsClient
+from app.tools.tripvlog_dummy import TripVlogDummyClient
 
 
 def build_trip_graph(
@@ -21,6 +24,15 @@ def build_trip_graph(
 ):
     builder = StateGraph(TripState)
     builder.add_node("supervisor", SupervisorAgent(model))
+    builder.add_node("general", GeneralAssistantAgent(model))
+    builder.add_node(
+        "hotel_search",
+        HotelSearchAgent(
+            maps=maps,
+            tripvlog=TripVlogDummyClient(),
+            max_results=settings.max_research_results,
+        ),
+    )
     builder.add_node("trip_scope", TripScopeAgent(model))
     builder.add_node(
         "stay",
@@ -44,8 +56,15 @@ def build_trip_graph(
     builder.add_conditional_edges(
         "supervisor",
         _after_supervisor,
-        {"clarify": END, "plan": "trip_scope"},
+        {
+            "clarify": END,
+            "general": "general",
+            "hotel_search": "hotel_search",
+            "plan": "trip_scope",
+        },
     )
+    builder.add_edge("general", END)
+    builder.add_edge("hotel_search", END)
     builder.add_edge("trip_scope", "stay")
     builder.add_edge("trip_scope", "activity")
     builder.add_edge("trip_scope", "travel_info")
@@ -58,4 +77,10 @@ def build_trip_graph(
 
 
 def _after_supervisor(state: TripState) -> str:
-    return "clarify" if state.get("clarifications") else "plan"
+    if state.get("clarifications"):
+        return "clarify"
+    if state.get("hotel_search"):
+        return "hotel_search"
+    if state.get("draft") and state["draft"].intent == "GENERAL":
+        return "general"
+    return "plan"

@@ -16,6 +16,20 @@ class _FailingGraph:
         raise RuntimeError("dummy graph failure")
 
 
+class _CompletingGraph:
+    async def astream(self, inputs, *, stream_mode, version):
+        yield {
+            "type": "values",
+            "data": {
+                "plan": {
+                    "status": "valid",
+                    "itinerary": [],
+                    "budget": {},
+                }
+            },
+        }
+
+
 class _DurableReadRepository:
     def __init__(self, snapshot: RunSnapshot, events: list[RunEvent]) -> None:
         self.snapshot = snapshot
@@ -60,6 +74,27 @@ async def test_run_manager_reports_sanitized_graph_failures_and_events() -> None
     assert snapshot.error is not None
     assert "dummy graph failure" not in snapshot.error
     assert [event.type for event in events] == ["run.started", "run.failed"]
+
+
+async def test_live_subscriber_receives_terminal_event_before_stream_closes() -> None:
+    manager = InMemoryRunManager(
+        _CompletingGraph(),
+        retention_seconds=60,
+        heartbeat_seconds=1,
+    )
+    snapshot = await manager.create(PlanTripRequest(message="Plan a dummy trip"))
+    try:
+        events = [
+            event
+            async for event in manager.subscribe(snapshot.run_id)
+            if event is not None
+        ]
+        completed = await manager.get(snapshot.run_id)
+    finally:
+        await manager.close()
+
+    assert completed.status == RunStatus.COMPLETED
+    assert events[-1].type == "run.completed"
 
 
 async def test_run_manager_rejects_unknown_run_ids() -> None:

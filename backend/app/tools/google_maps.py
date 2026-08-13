@@ -5,7 +5,15 @@ from urllib.parse import urlencode
 import httpx
 
 from app.schemas.common import LocationRef, SourceRef
-from app.schemas.trip import GooglePlacePayload, MapRoute, RouteLeg, TravelMode
+from app.schemas.trip import (
+    GoogleOpeningHoursPayload,
+    GooglePhotoPayload,
+    GooglePlacePayload,
+    GoogleReviewPayload,
+    MapRoute,
+    RouteLeg,
+    TravelMode,
+)
 
 
 class ProviderNotConfiguredError(RuntimeError):
@@ -56,7 +64,11 @@ class GoogleMapsClient:
                 "X-Goog-FieldMask": (
                     "places.id,places.displayName,places.formattedAddress,places.location,"
                     "places.rating,places.userRatingCount,places.googleMapsUri,places.websiteUri,"
-                    "places.types,places.priceLevel"
+                    "places.types,places.priceLevel,places.businessStatus,places.photos,"
+                    "places.reviews,places.editorialSummary,places.regularOpeningHours,"
+                    "places.nationalPhoneNumber,places.internationalPhoneNumber,"
+                    "places.accessibilityOptions,places.parkingOptions,places.allowsDogs,"
+                    "places.servesBreakfast,places.restroom"
                 ),
             },
         )
@@ -64,6 +76,7 @@ class GoogleMapsClient:
         for item in response.get("places", []):
             display_name = item.get("displayName", {})
             location = item.get("location", {})
+            opening_hours = item.get("regularOpeningHours")
             places.append(
                 GooglePlacePayload(
                     id=item["id"],
@@ -77,9 +90,56 @@ class GoogleMapsClient:
                     website_uri=item.get("websiteUri"),
                     types=item.get("types", []),
                     price_level=item.get("priceLevel"),
+                    business_status=item.get("businessStatus"),
+                    national_phone_number=item.get("nationalPhoneNumber"),
+                    international_phone_number=item.get("internationalPhoneNumber"),
+                    editorial_summary=item.get("editorialSummary", {}).get("text"),
+                    amenities=_place_amenities(item),
+                    photos=[_photo_payload(photo) for photo in item.get("photos", [])[:10]],
+                    reviews=[_review_payload(review) for review in item.get("reviews", [])[:5]],
+                    opening_hours=(
+                        GoogleOpeningHoursPayload(
+                            open_now=opening_hours.get("openNow"),
+                            weekday_descriptions=opening_hours.get(
+                                "weekdayDescriptions", []
+                            ),
+                            next_open_time=opening_hours.get("nextOpenTime"),
+                            next_close_time=opening_hours.get("nextCloseTime"),
+                        )
+                        if opening_hours
+                        else None
+                    ),
                 )
             )
         return places
+
+    async def get_photo_media(
+        self,
+        photo_name: str,
+        *,
+        max_width_px: int = 1200,
+        max_height_px: int = 900,
+    ) -> httpx.Response:
+        self._require_key()
+        if not photo_name.startswith("places/") or "/photos/" not in photo_name:
+            raise ValueError("Invalid Google Places photo resource name")
+        width = min(max(max_width_px, 1), 4800)
+        height = min(max(max_height_px, 1), 4800)
+        try:
+            response = await self._client.get(
+                f"https://places.googleapis.com/v1/{photo_name}/media",
+                params={"maxWidthPx": width, "maxHeightPx": height},
+                headers={"X-Goog-Api-Key": self._api_key or ""},
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ExternalProviderError(
+                f"photo provider returned HTTP {exc.response.status_code}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ExternalProviderError("photo provider request failed") from exc
+        return response
 
     async def compute_round_trip(
         self,
@@ -274,3 +334,65 @@ def _duration_seconds(value: str | None) -> int | None:
         return round(float(value[:-1]))
     except ValueError:
         return None
+
+
+def _photo_payload(value: dict[str, Any]) -> GooglePhotoPayload:
+    author = (value.get("authorAttributions") or [{}])[0]
+    return GooglePhotoPayload(
+        name=value.get("name", ""),
+        width_px=value.get("widthPx"),
+        height_px=value.get("heightPx"),
+        author_name=author.get("displayName"),
+        author_uri=author.get("uri"),
+        author_photo_uri=author.get("photoUri"),
+        google_maps_uri=value.get("googleMapsUri"),
+        flag_content_uri=value.get("flagContentUri"),
+    )
+
+
+def _review_payload(value: dict[str, Any]) -> GoogleReviewPayload:
+    author = value.get("authorAttribution") or {}
+    return GoogleReviewPayload(
+        name=value.get("name", ""),
+        rating=value.get("rating", 0),
+        text=(value.get("text") or {}).get("text"),
+        relative_publish_time_description=value.get(
+            "relativePublishTimeDescription"
+        ),
+        publish_time=value.get("publishTime"),
+        author_name=author.get("displayName"),
+        author_uri=author.get("uri"),
+        author_photo_uri=author.get("photoUri"),
+        google_maps_uri=value.get("googleMapsUri"),
+        flag_content_uri=value.get("flagContentUri"),
+    )
+
+
+def _place_amenities(value: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+    accessibility = value.get("accessibilityOptions") or {}
+    parking = value.get("parkingOptions") or {}
+    options = (
+        ("allowsDogs", "Dogs allowed"),
+        ("servesBreakfast", "Breakfast available"),
+        ("restroom", "Restroom"),
+    )
+    accessibility_options = (
+        ("wheelchairAccessibleEntrance", "Wheelchair-accessible entrance"),
+        ("wheelchairAccessibleParking", "Wheelchair-accessible parking"),
+        ("wheelchairAccessibleRestroom", "Wheelchair-accessible restroom"),
+        ("wheelchairAccessibleSeating", "Wheelchair-accessible seating"),
+    )
+    parking_options = (
+        ("freeParkingLot", "Free parking lot"),
+        ("paidParkingLot", "Paid parking lot"),
+        ("freeStreetParking", "Free street parking"),
+        ("paidStreetParking", "Paid street parking"),
+        ("valetParking", "Valet parking"),
+    )
+    labels.extend(label for key, label in options if value.get(key) is True)
+    labels.extend(
+        label for key, label in accessibility_options if accessibility.get(key) is True
+    )
+    labels.extend(label for key, label in parking_options if parking.get(key) is True)
+    return labels

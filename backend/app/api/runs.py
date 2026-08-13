@@ -14,6 +14,21 @@ from app.supabase import AuthenticatedUser, AuthenticationError, PersistenceErro
 router = APIRouter(prefix="/api/v1", tags=["trip planning"])
 
 
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: UUID,
+    manager: Annotated[InMemoryRunManager, Depends(get_run_manager)],
+    user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> Response:
+    try:
+        deleted = await manager.delete_conversation(conversation_id, user.id)
+    except PersistenceError as exc:
+        raise HTTPException(status_code=502, detail="Could not delete conversation") from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/trips/runs",
     response_model=CreateRunResponse,

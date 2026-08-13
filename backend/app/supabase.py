@@ -45,7 +45,15 @@ class TripRepository(Protocol):
         needs_clarification: bool,
     ) -> None: ...
 
+    async def set_conversation_title_if_default(
+        self, *, conversation_id: UUID, title: str
+    ) -> None: ...
+
     async def owns_run(self, *, user_id: UUID, run_id: UUID) -> bool: ...
+
+    async def soft_delete_conversation(
+        self, *, user_id: UUID, conversation_id: UUID
+    ) -> bool: ...
 
     async def get_run(self, run_id: UUID) -> RunSnapshot | None: ...
 
@@ -115,7 +123,7 @@ class SupabaseGateway:
                     "id": str(conversation_id),
                     "owner_user_id": str(user_id),
                     "client_request_id": str(request.client_request_id or uuid4()),
-                    "title": request.title or request.message[:120],
+                    "title": request.title or "New conversation",
                     "status": "active",
                     "metadata": {},
                 },
@@ -198,7 +206,45 @@ class SupabaseGateway:
         result: dict[str, Any],
         needs_clarification: bool,
     ) -> None:
-        kind = "clarification" if needs_clarification else "trip_plan"
+        is_hotel_search = (
+            not needs_clarification
+            and isinstance(result.get("properties"), list)
+            and result.get("mode") in {"exploratory", "bookable"}
+        )
+        is_general = result.get("intent") == "GENERAL" and isinstance(
+            result.get("message"), str
+        )
+        if is_general:
+            await self._request(
+                "POST",
+                "messages",
+                json={
+                    "public_id": str(uuid4()),
+                    "conversation_id": str(conversation_id),
+                    "author_user_id": None,
+                    "role": "assistant",
+                    "status": "complete",
+                    "content": result["message"],
+                    "metadata": {
+                        "run_id": str(run_id),
+                        "result_kind": "general_response",
+                    },
+                },
+            )
+            await self._request(
+                "PATCH",
+                "conversations",
+                params={"id": f"eq.{conversation_id}"},
+                json={"last_message_at": datetime.now(UTC).isoformat()},
+            )
+            return
+        kind = (
+            "clarification"
+            if needs_clarification
+            else "hotel_search"
+            if is_hotel_search
+            else "trip_plan"
+        )
         await self._request(
             "PATCH",
             "artifacts",
@@ -231,9 +277,15 @@ class SupabaseGateway:
                 "kind": kind,
                 "version": version,
                 "schema_version": 1,
-                "status": "complete",
+                "status": "final",
                 "is_current": True,
-                "title": "Trip clarification" if needs_clarification else "Trip itinerary",
+                "title": (
+                    "Trip clarification"
+                    if needs_clarification
+                    else "Hotel search results"
+                    if is_hotel_search
+                    else "Trip itinerary"
+                ),
                 "payload": result,
             },
         )
@@ -249,6 +301,8 @@ class SupabaseGateway:
                 "content": (
                     "I need a few details before planning your trip."
                     if needs_clarification
+                    else "I found hotel options for you."
+                    if is_hotel_search
                     else "Your trip plan is ready."
                 ),
                 "metadata": {"run_id": str(run_id), "artifact_kind": kind},
@@ -259,6 +313,31 @@ class SupabaseGateway:
             "conversations",
             params={"id": f"eq.{conversation_id}"},
             json={"last_message_at": datetime.now(UTC).isoformat()},
+        )
+
+    async def set_conversation_title_if_default(
+        self, *, conversation_id: UUID, title: str
+    ) -> None:
+        clean_title = " ".join(title.split())[:80]
+        if not clean_title:
+            return
+        rows = await self._request(
+            "GET",
+            "conversations",
+            params={
+                "select": "title",
+                "id": f"eq.{conversation_id}",
+                "limit": "1",
+            },
+        )
+        current_title = rows[0].get("title") if rows else None
+        if current_title and current_title not in {"New conversation", "New trip"}:
+            return
+        await self._request(
+            "PATCH",
+            "conversations",
+            params={"id": f"eq.{conversation_id}"},
+            json={"title": clean_title, "updated_at": datetime.now(UTC).isoformat()},
         )
 
     async def owns_run(self, *, user_id: UUID, run_id: UUID) -> bool:
@@ -285,6 +364,26 @@ class SupabaseGateway:
             },
         )
         return bool(conversations)
+
+    async def soft_delete_conversation(
+        self, *, user_id: UUID, conversation_id: UUID
+    ) -> bool:
+        rows = await self._request(
+            "PATCH",
+            "conversations",
+            params={
+                "select": "id",
+                "id": f"eq.{conversation_id}",
+                "owner_user_id": f"eq.{user_id}",
+                "deleted_at": "is.null",
+            },
+            json={
+                "deleted_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+            headers={"Prefer": "return=representation"},
+        )
+        return bool(rows)
 
     async def get_run(self, run_id: UUID) -> RunSnapshot | None:
         rows = await self._request(
@@ -352,7 +451,13 @@ class SupabaseGateway:
         except httpx.HTTPError as exc:
             raise PersistenceError(f"Supabase {table} is unavailable") from exc
         if response.status_code >= 400:
-            raise PersistenceError(f"Supabase {table} request failed ({response.status_code})")
+            # PostgREST returns the violated column/constraint in a small JSON body.
+            # Keep enough detail for server-side diagnosis without logging headers or keys.
+            detail = response.text.strip().replace("\n", " ")[:1000]
+            suffix = f": {detail}" if detail else ""
+            raise PersistenceError(
+                f"Supabase {table} request failed ({response.status_code}){suffix}"
+            )
         if not response.content:
             return []
         return response.json()

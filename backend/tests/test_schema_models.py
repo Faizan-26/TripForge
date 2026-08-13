@@ -121,8 +121,9 @@ def test_request_models_derive_dates_and_reject_invalid_ranges() -> None:
 
     with pytest.raises(ValidationError):
         TripRequestDraft(start_date=date(2027, 1, 12), end_date=date(2027, 1, 10))
+    assert PlanTripRequest(message="hi").message == "hi"
     with pytest.raises(ValidationError):
-        PlanTripRequest(message="hi")
+        PlanTripRequest(message="   ")
 
 
 def test_clarification_scope_and_research_models() -> None:

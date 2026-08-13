@@ -24,7 +24,52 @@ class StayAgent:
 
     async def __call__(self, state: TripState, writer: StreamWriter) -> dict[str, Any]:
         scope = state["scope"]
+        selected_hotel = state["requirements"].selected_hotel
         emit(writer, "agent.started", self.name, "Researching grounded stay options")
+        if selected_hotel:
+            provider_id = (
+                selected_hotel.provider_ids.get("google_places")
+                or selected_hotel.property_id
+            )
+            selected_candidate = PlaceCandidate(
+                provider_id=provider_id,
+                kind="stay",
+                name=selected_hotel.name,
+                location=LocationRef(
+                    label=selected_hotel.location.label,
+                    formatted_address=selected_hotel.location.formatted_address,
+                    place_id=selected_hotel.location.place_id,
+                    coordinates=selected_hotel.location.coordinates,
+                    google_maps_uri=selected_hotel.location.google_maps_uri,
+                ),
+                types=["lodging"],
+                website_uri=None,
+                source=SourceRef(
+                    provider=(
+                        "google_places"
+                        if selected_hotel.provider_ids.get("google_places")
+                        else "user"
+                    ),
+                    provider_id=provider_id,
+                    uri=selected_hotel.location.google_maps_uri,
+                    retrieved_at=datetime.now(UTC).isoformat(),
+                ),
+            )
+            emit(
+                writer,
+                "agent.completed",
+                self.name,
+                "Using the traveler-selected hotel",
+                {"selected_stay_id": provider_id},
+            )
+            return {
+                "stay_research": ResearchResult(
+                    candidates=[selected_candidate],
+                    warnings=[
+                        "The traveler selected this property from an earlier hotel search."
+                    ],
+                )
+            }
         emit(writer, "tool.started", self.name, "Searching Google Places for lodging")
         warnings = [
             "Google Places does not provide live room prices or availability; a dedicated "
@@ -79,7 +124,12 @@ class ActivityAgent:
             f"best {interest} attractions in {region}"
             for region in scope.base_regions
             for interest in trip.interests
-        ][: self._max_queries]
+        ]
+        if not queries:
+            queries = [
+                f"best attractions in {region}" for region in scope.base_regions
+            ]
+        queries = queries[: self._max_queries]
         emit(
             writer,
             "tool.started",

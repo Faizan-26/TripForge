@@ -21,6 +21,16 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-5-mini"
+    # Optional OpenAI-compatible endpoint, for example Groq or OpenRouter.
+    openai_base_url: str | None = None
+
+    # LangSmith observability/evaluation. Tracing stays disabled unless both
+    # LANGSMITH_TRACING=true and LANGSMITH_API_KEY are provided.
+    langsmith_tracing: bool = False
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "tripforge"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_workspace_id: str | None = None
 
     google_maps_api_key: str | None = None
 

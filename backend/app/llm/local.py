@@ -1,9 +1,15 @@
 import re
+from datetime import date
+
+from app.schemas.hotel import HotelSearchConstraints, HotelSearchMode
 
 from app.llm.base import PlanningModel
 from app.schemas.trip import (
+    ConversationTurn,
+    GeneralAssistantResult,
     ItineraryAssignment,
     ItineraryDecision,
+    Intent,
     PlaceCandidate,
     ScopeDecision,
     TravelMode,
@@ -38,6 +44,31 @@ class LocalPlanningModel(PlanningModel):
         text = " ".join(message.strip().split())
         lower = text.lower()
 
+        explicitly_plans_trip = bool(
+            re.search(r"\b(plan|build|create|organize)\b.+\btrip\b|\bitinerary\b", lower)
+        )
+        intent = (
+            Intent.FULL_TRIP_PLAN
+            if explicitly_plans_trip
+            else Intent.HOTEL_SEARCH
+            if re.search(r"\b(hotels?|lodging|accommodation|places? to stay)\b", lower)
+            else Intent.GENERAL
+        )
+        hotel_mode: HotelSearchMode | None = None
+        if intent == Intent.HOTEL_SEARCH:
+            requests_live_data = bool(
+                re.search(
+                    r"\b(bookable|available|availability|book|price|pricing|rates?|under|"
+                    r"budget|costs?|from\s+[a-z]+\s+\d{1,2})\b|[$â‚¬Â£]",
+                    lower,
+                )
+            )
+            hotel_mode = (
+                HotelSearchMode.BOOKABLE
+                if requests_live_data
+                else HotelSearchMode.EXPLORATORY
+            )
+
         origin: str | None = None
         destination: str | None = None
         route_match = re.search(
@@ -45,9 +76,27 @@ class LocalPlanningModel(PlanningModel):
             text,
             flags=re.IGNORECASE,
         )
-        if route_match:
+        destination_first_route_match = re.search(
+            r"\b(?:trip|travel)\s+to\s+(.+?)\s+from\s+(.+?)"
+            r"(?=\s+(?:for|with|on a|around|under)\b|[,.]|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if intent == Intent.HOTEL_SEARCH:
+            hotel_location = re.search(
+                r"\bhotels?\s+(?:near|around|by|in)\s+(.+?)"
+                r"(?=\s+(?:under|below|up to|from|for|with|on)\b|[,.]|$)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if hotel_location and hotel_location.group(1).strip().lower() != "nearby":
+                destination = hotel_location.group(1).strip()
+        elif route_match:
             origin = route_match.group(1).strip()
             destination = route_match.group(2).strip()
+        elif destination_first_route_match:
+            destination = destination_first_route_match.group(1).strip()
+            origin = destination_first_route_match.group(2).strip()
         else:
             destination_match = re.search(
                 r"\b(?:trip to|travel to|visit|in)\s+(.+?)"
@@ -121,7 +170,21 @@ class LocalPlanningModel(PlanningModel):
         elif "bicycle" in lower or "cycling" in lower:
             travel_mode = TravelMode.BICYCLE
 
+        check_in, check_out = self._find_date_range(text)
+        hotel_search = None
+        if intent == Intent.HOTEL_SEARCH:
+            hotel_search = HotelSearchConstraints(
+                destination_query=destination,
+                check_in=check_in,
+                check_out=check_out,
+                adults=travelers,
+                currency=currency,
+                max_total_price=budget_total,
+            )
+
         return TripRequestDraft(
+            intent=intent,
+            hotel_search_mode=hotel_mode,
             destination=destination,
             origin=origin,
             travelers=travelers,
@@ -131,7 +194,45 @@ class LocalPlanningModel(PlanningModel):
             interests=interests,
             pace=pace,
             travel_mode=travel_mode,
+            start_date=check_in if intent == Intent.HOTEL_SEARCH else None,
+            end_date=check_out if intent == Intent.HOTEL_SEARCH else None,
+            hotel_search=hotel_search,
         )
+
+    async def answer_general(
+        self, message: str, context: list[ConversationTurn]
+    ) -> GeneralAssistantResult:
+        lower = message.strip().lower()
+        if re.fullmatch(r"(?:hi+|hey+|hello|salam|assalamualaikum)[!. ]*", lower):
+            response = (
+                "Hi! I’m TripForge. I can help you explore destinations, find hotels, "
+                "or turn an idea into a complete trip plan. What are you thinking about?"
+            )
+        elif any(term in lower for term in ("what can you do", "help me", "how can you help")):
+            response = (
+                "I can answer travel questions, compare grounded hotel options, and build "
+                "a day-by-day trip plan. Tell me what you want to explore, or ask me to find "
+                "hotels or plan a trip when you’re ready."
+            )
+        else:
+            response = (
+                "I can help with that as your TripForge travel assistant. Share the place or "
+                "travel question you have in mind; if you want results, say “find hotels,” and "
+                "if you want an itinerary, say “plan a trip.”"
+            )
+        return GeneralAssistantResult(
+            message=response,
+            conversation_title=await self.suggest_title(message),
+        )
+
+    async def suggest_title(self, message: str) -> str:
+        words = re.findall(r"[\w'-]+", message.strip(), flags=re.UNICODE)
+        if not words:
+            return "Travel conversation"
+        if len(words) <= 2 and words[0].lower().rstrip("!") in {"hi", "hii", "hiii", "hey", "hello"}:
+            return "Travel conversation"
+        title = " ".join(words[:7]).strip()
+        return title[:80].capitalize()
 
     async def decide_scope(self, trip: TripRequirements) -> ScopeDecision:
         return ScopeDecision(
@@ -171,3 +272,45 @@ class LocalPlanningModel(PlanningModel):
             return None
         token = match.group(1)
         return int(token) if token.isdigit() else _NUMBER_WORDS.get(token)
+
+    @staticmethod
+    def _find_date_range(text: str) -> tuple[date | None, date | None]:
+        months = {
+            "january": 1,
+            "february": 2,
+            "march": 3,
+            "april": 4,
+            "may": 5,
+            "june": 6,
+            "july": 7,
+            "august": 8,
+            "september": 9,
+            "october": 10,
+            "november": 11,
+            "december": 12,
+        }
+        match = re.search(
+            r"\bfrom\s+(" + "|".join(months) + r")\s+(\d{1,2})"
+            r"(?:,?\s+(\d{4}))?\s+to\s+(?:(" + "|".join(months) + r")\s+)?"
+            r"(\d{1,2})(?:,?\s+(\d{4}))?\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None, None
+        today = date.today()
+        start_month = months[match.group(1).lower()]
+        end_month = months[(match.group(4) or match.group(1)).lower()]
+        start_year = int(match.group(3)) if match.group(3) else today.year
+        if not match.group(3) and (start_month, int(match.group(2))) < (today.month, today.day):
+            start_year += 1
+        end_year = int(match.group(6)) if match.group(6) else start_year
+        if end_month < start_month and not match.group(6):
+            end_year += 1
+        try:
+            return (
+                date(start_year, start_month, int(match.group(2))),
+                date(end_year, end_month, int(match.group(5))),
+            )
+        except ValueError:
+            return None, None

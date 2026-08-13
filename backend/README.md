@@ -20,6 +20,23 @@ source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
 uvicorn app.main:create_app --factory --reload
+
+## LangSmith observability and evaluation
+
+Set `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY`, and optionally
+`LANGSMITH_PROJECT=tripforge` in the backend environment. Every LangGraph run
+will then appear in LangSmith with the supervisor, scope, research, itinerary,
+budget, and validator nodes, including nested model/tool calls. The API health
+response reports whether tracing is enabled.
+
+To evaluate a LangSmith dataset whose examples contain `PlanTripRequest` fields:
+
+```bash
+python scripts/evaluate_langsmith.py --dataset tripforge-regression
+```
+
+Create the dataset and custom evaluators in LangSmith, then compare experiments
+under the `tripforge` prefix.
 ```
 
 The backend's real environment file is exactly `backend/.env`. Supabase requires

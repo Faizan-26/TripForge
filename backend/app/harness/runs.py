@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from app.schemas.events import RunEvent, RunSnapshot, RunStatus
 from app.schemas.trip import PlanTripRequest
 from app.supabase import TripRepository
+from app.services.langsmith import trace_config
 
 logger = logging.getLogger(__name__)
 DEV_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -95,6 +97,14 @@ class InMemoryRunManager:
             name=f"trip-run-{record.run_id}",
         )
         return record.snapshot()
+
+    async def delete_conversation(self, conversation_id: UUID, user_id: UUID) -> bool:
+        if not self._repository:
+            return False
+        return await self._repository.soft_delete_conversation(
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
 
     async def get(self, run_id: UUID) -> RunSnapshot:
         record = self._records.get(run_id)
@@ -192,10 +202,20 @@ class InMemoryRunManager:
                     )
                 },
             )
+            stream_kwargs = {
+                "stream_mode": ["custom", "values"],
+                "version": "v2",
+            }
+            # Keep lightweight graph doubles used by tests/backfills compatible
+            # while passing full LangSmith metadata to real LangGraph graphs.
+            if "config" in inspect.signature(self._graph.astream).parameters:
+                stream_kwargs["config"] = trace_config(
+                    run_id=record.run_id,
+                    conversation_id=record.conversation_id,
+                    parent_run_id=record.request.parent_run_id,
+                )
             async for part in self._graph.astream(
-                {"request": record.request},
-                stream_mode=["custom", "values"],
-                version="v2",
+                {"request": record.request}, **stream_kwargs
             ):
                 if part["type"] == "custom":
                     payload = part["data"]
@@ -214,7 +234,6 @@ class InMemoryRunManager:
                     "draft": _jsonable(final_state.get("draft")),
                     "questions": _jsonable(final_state["clarifications"]),
                 }
-                await self._set_status(record, RunStatus.NEEDS_CLARIFICATION)
                 if self._repository:
                     await self._repository.save_result(
                         conversation_id=record.conversation_id,
@@ -231,11 +250,14 @@ class InMemoryRunManager:
                     record,
                     event_type="run.paused",
                     message="Trip planning is waiting for clarification",
-                    data=record.result,
+                    data={
+                        **record.result,
+                        "conversation_title": final_state.get("conversation_title"),
+                    },
+                    terminal_status=RunStatus.NEEDS_CLARIFICATION,
                 )
             elif final_state.get("plan"):
                 record.result = _jsonable(final_state["plan"])
-                await self._set_status(record, RunStatus.COMPLETED)
                 if self._repository:
                     await self._repository.save_result(
                         conversation_id=record.conversation_id,
@@ -252,16 +274,75 @@ class InMemoryRunManager:
                     record,
                     event_type="run.completed",
                     message="Trip planning completed",
-                    data={"plan_status": record.result.get("status")},
+                    data={
+                        "plan_status": record.result.get("status"),
+                        "conversation_title": final_state.get("conversation_title"),
+                    },
+                    terminal_status=RunStatus.COMPLETED,
+                )
+            elif final_state.get("hotel_result"):
+                record.result = _jsonable(final_state["hotel_result"])
+                if self._repository:
+                    await self._repository.save_result(
+                        conversation_id=record.conversation_id,
+                        run_id=record.run_id,
+                        result=record.result,
+                        needs_clarification=False,
+                    )
+                    await self._repository.update_run(
+                        record.run_id,
+                        status="completed",
+                        completed_at=datetime.now(UTC).isoformat(),
+                    )
+                await self._publish(
+                    record,
+                    event_type="run.completed",
+                    message="Hotel search completed",
+                    data={
+                        "intent": "HOTEL_SEARCH",
+                        "property_count": len(record.result.get("properties", [])),
+                        "conversation_title": final_state.get("conversation_title"),
+                    },
+                    terminal_status=RunStatus.COMPLETED,
+                )
+            elif final_state.get("general_result"):
+                record.result = _jsonable(final_state["general_result"])
+                if self._repository:
+                    await self._repository.save_result(
+                        conversation_id=record.conversation_id,
+                        run_id=record.run_id,
+                        result=record.result,
+                        needs_clarification=False,
+                    )
+                    await self._repository.update_run(
+                        record.run_id,
+                        status="completed",
+                        completed_at=datetime.now(UTC).isoformat(),
+                    )
+                await self._publish(
+                    record,
+                    event_type="run.completed",
+                    message="Response completed",
+                    data={
+                        "intent": "GENERAL",
+                        "conversation_title": final_state.get("conversation_title"),
+                    },
+                    terminal_status=RunStatus.COMPLETED,
                 )
             else:
-                raise RuntimeError("The graph finished without a plan or clarification request")
+                raise RuntimeError("The graph finished without a supported result")
+
+            conversation_title = final_state.get("conversation_title")
+            if self._repository and conversation_title:
+                await self._repository.set_conversation_title_if_default(
+                    conversation_id=record.conversation_id,
+                    title=conversation_title,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Trip planning run %s failed", record.run_id)
             record.error = "The planning run failed. Check server logs for the provider error."
-            await self._set_status(record, RunStatus.FAILED)
             if self._repository:
                 try:
                     await self._repository.update_run(
@@ -278,6 +359,7 @@ class InMemoryRunManager:
                     record,
                     event_type="run.failed",
                     message=record.error,
+                    terminal_status=RunStatus.FAILED,
                 )
             except Exception:
                 logger.exception("Could not persist failure event for run %s", record.run_id)
@@ -290,6 +372,7 @@ class InMemoryRunManager:
         message: str,
         agent: str | None = None,
         data: dict[str, Any] | None = None,
+        terminal_status: RunStatus | None = None,
     ) -> None:
         async with record.condition:
             event = RunEvent(
@@ -301,6 +384,8 @@ class InMemoryRunManager:
                 data=data or {},
             )
             record.events.append(event)
+            if terminal_status is not None:
+                record.status = terminal_status
             record.updated_at = datetime.now(UTC)
             record.condition.notify_all()
         if self._repository:

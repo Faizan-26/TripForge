@@ -32,6 +32,49 @@ async def test_places_request_and_response_are_normalized_without_network() -> N
                         "websiteUri": "https://example.test/hotel",
                         "types": ["lodging"],
                         "priceLevel": "PRICE_LEVEL_MODERATE",
+                        "businessStatus": "OPERATIONAL",
+                        "nationalPhoneNumber": "051 1234567",
+                        "internationalPhoneNumber": "+92 51 1234567",
+                        "editorialSummary": {"text": "A central business hotel."},
+                        "allowsDogs": True,
+                        "servesBreakfast": True,
+                        "accessibilityOptions": {
+                            "wheelchairAccessibleEntrance": True,
+                        },
+                        "parkingOptions": {"freeParkingLot": True},
+                        "regularOpeningHours": {
+                            "openNow": True,
+                            "weekdayDescriptions": ["Monday: Open 24 hours"],
+                            "nextCloseTime": "2027-06-11T00:00:00Z",
+                        },
+                        "photos": [
+                            {
+                                "name": "places/hotel-1/photos/photo-1",
+                                "widthPx": 1600,
+                                "heightPx": 900,
+                                "authorAttributions": [
+                                    {
+                                        "displayName": "Test Photographer",
+                                        "uri": "https://maps.google.com/photographer",
+                                    }
+                                ],
+                                "googleMapsUri": "https://maps.google.com/photo-1",
+                            }
+                        ],
+                        "reviews": [
+                            {
+                                "name": "places/hotel-1/reviews/review-1",
+                                "rating": 5,
+                                "text": {"text": "Clean rooms and friendly staff."},
+                                "relativePublishTimeDescription": "a month ago",
+                                "publishTime": "2027-05-01T10:00:00Z",
+                                "authorAttribution": {
+                                    "displayName": "Test Traveler",
+                                    "uri": "https://maps.google.com/traveler",
+                                },
+                                "googleMapsUri": "https://maps.google.com/review-1",
+                            }
+                        ],
                     }
                 ]
             },
@@ -51,8 +94,21 @@ async def test_places_request_and_response_are_normalized_without_network() -> N
     assert len(results) == 1
     assert results[0].id == "hotel-1"
     assert results[0].coordinates() == Coordinates(latitude=33.71, longitude=73.055)
+    assert results[0].photos[0].author_name == "Test Photographer"
+    assert results[0].reviews[0].text == "Clean rooms and friendly staff."
+    assert results[0].opening_hours is not None
+    assert results[0].opening_hours.open_now is True
+    assert results[0].editorial_summary == "A central business hotel."
+    assert results[0].amenities == [
+        "Dogs allowed",
+        "Breakfast available",
+        "Wheelchair-accessible entrance",
+        "Free parking lot",
+    ]
     assert captured[0].headers["X-Goog-Api-Key"] == "dummy-key"
     assert "places.id" in captured[0].headers["X-Goog-FieldMask"]
+    assert "places.photos" in captured[0].headers["X-Goog-FieldMask"]
+    assert "places.reviews" in captured[0].headers["X-Goog-FieldMask"]
     assert json.loads(captured[0].content) == {
         "textQuery": "hotels in Islamabad",
         "pageSize": 3,
@@ -113,6 +169,31 @@ async def test_routes_request_reorders_dummy_waypoints_and_builds_legs() -> None
         ("Dummy Park", "Dummy Museum"),
         ("Dummy Museum", "Dummy Hotel"),
     ]
+
+
+async def test_place_photo_media_uses_private_key_and_bounded_dimensions() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, content=b"image-data", headers={"content-type": "image/jpeg"})
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    maps = GoogleMapsClient("dummy-key", client=http_client)
+    try:
+        response = await maps.get_photo_media(
+            "places/hotel-1/photos/photo-1",
+            max_width_px=9999,
+            max_height_px=0,
+        )
+    finally:
+        await http_client.aclose()
+
+    assert response.content == b"image-data"
+    assert captured[0].headers["X-Goog-Api-Key"] == "dummy-key"
+    assert captured[0].url.params["maxWidthPx"] == "4800"
+    assert captured[0].url.params["maxHeightPx"] == "1"
+    assert "dummy-key" not in str(captured[0].url)
 
 
 async def test_unconfigured_and_failed_providers_return_safe_offline_results() -> None:

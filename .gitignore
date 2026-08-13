@@ -2,3 +2,5 @@
 *.env
 .venv
 .package-lock.json
+
+trip*.md

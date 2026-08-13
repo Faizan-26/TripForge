@@ -17,7 +17,26 @@ export default function Home() {
   const [authOpen, setAuthOpen] = useState(false);
   const [tripError, setTripError] = useState("");
   const [isCheckingAuth, setIsCheckingAuth] = useState(false);
+  const [isSignedIn, setIsSignedIn] = useState<boolean | null>(null);
   const pageRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    let active = true;
+
+    void supabase.auth.getClaims().then(({ data }) => {
+      if (active) setIsSignedIn(Boolean(data?.claims?.sub));
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) setIsSignedIn(Boolean(session?.user));
+    });
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const elements = pageRef.current?.querySelectorAll<HTMLElement>("[data-reveal]");
@@ -45,7 +64,7 @@ export default function Home() {
   }
 
   return <main className={styles.page} ref={pageRef}>
-    <nav className={styles.nav} aria-label="Main navigation"><a className={styles.brand} href="#top" aria-label="TripForge home"><span>Trip</span>Forge</a><div className={styles.navLinks}><a href="#how-it-works">How it works</a><a href="#why-tripforge">Why TripForge</a></div><button className={styles.signIn} type="button" onClick={() => setAuthOpen(true)}>Sign in</button></nav>
+    <nav className={styles.nav} aria-label="Main navigation"><a className={styles.brand} href="#top" aria-label="TripForge home"><span>Trip</span>Forge</a><div className={styles.navLinks}><a href="#how-it-works">How it works</a><a href="#why-tripforge">Why TripForge</a></div><button className={`${styles.signIn} ${isSignedIn === null ? styles.authPending : ""}`} type="button" aria-hidden={isSignedIn === null} tabIndex={isSignedIn === null ? -1 : 0} onClick={() => isSignedIn ? router.push("/chat/new") : setAuthOpen(true)}>{isSignedIn ? "Plan your trip" : "Sign in"}</button></nav>
     <section className={styles.hero} id="top">
       <div className={styles.heroCopy} data-reveal><h1>Travel, thoughtfully assembled.</h1><p className={styles.intro}>One idea in. A considered route out.</p><form className={styles.tripForm} onSubmit={openAuth}><label htmlFor="trip-request">Where would you like to go?</label><div className={styles.inputRow}><PlaneIcon /><input id="trip-request" value={tripRequest} onChange={(event) => setTripRequest(event.target.value)} placeholder="7 days in Pakistan for two, with mountains and great food" /><button type="submit" aria-label={isCheckingAuth ? "Checking sign-in" : "Start planning"} disabled={isCheckingAuth}><ArrowIcon /></button></div>{tripError && !authOpen && <p className={styles.formMessage} role="alert">{tripError}</p>}</form><p className={styles.hint}>A destination, a feeling, or a half-formed idea is enough.</p></div>
       <JourneyPreview />

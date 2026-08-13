@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
+from app.api.places import router as places_router
 from app.api.runs import router as runs_router
 from app.core.config import Settings, get_settings
 from app.graph.builder import build_trip_graph
@@ -14,6 +15,7 @@ from app.harness.runs import InMemoryRunManager
 from app.llm.base import PlanningModel
 from app.llm.factory import build_planning_model
 from app.supabase import SupabaseGateway
+from app.services.langsmith import configure_langsmith
 from app.tools.google_maps import GoogleMapsClient
 
 
@@ -25,6 +27,7 @@ def create_app(
     graph: Any | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
+    langsmith_enabled = configure_langsmith(app_settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -54,6 +57,7 @@ def create_app(
         app.state.maps_client = maps
         app.state.run_manager = manager
         app.state.supabase = supabase
+        app.state.langsmith_enabled = langsmith_enabled
         app.state.dev_user_id = UUID("00000000-0000-0000-0000-000000000001")
         yield
         await manager.close()
@@ -71,9 +75,10 @@ def create_app(
         CORSMiddleware,
         allow_origins=app_settings.app_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
     )
     app.include_router(health_router)
+    app.include_router(places_router)
     app.include_router(runs_router)
     return app

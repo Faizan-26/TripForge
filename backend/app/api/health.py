@@ -30,5 +30,7 @@ async def health(
                 and settings.supabase_secret_key
             ),
             "run_store": "in_memory_single_process",
+            "langsmith_tracing": settings.langsmith_tracing
+            and bool(settings.langsmith_api_key),
         },
     }

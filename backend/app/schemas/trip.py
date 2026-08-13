@@ -15,6 +15,13 @@ from app.schemas.common import (
     LocationRef,
     SourceRef,
 )
+from app.schemas.hotel import HotelSearchConstraints, HotelSearchMode, SelectedHotelContext
+
+
+class Intent(StrEnum):
+    GENERAL = "GENERAL"
+    FULL_TRIP_PLAN = "FULL_TRIP_PLAN"
+    HOTEL_SEARCH = "HOTEL_SEARCH"
 
 
 class TravelMode(StrEnum):
@@ -27,8 +34,19 @@ class TravelMode(StrEnum):
 AnswerValue = str | int | float | bool | list[str]
 
 
+class ConversationTurn(APIModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=6000)
+
+
+class GeneralAssistantResult(APIModel):
+    intent: Literal["GENERAL"] = "GENERAL"
+    message: str = Field(min_length=1, max_length=6000)
+    conversation_title: str = Field(min_length=1, max_length=80)
+
+
 class PlanTripRequest(APIModel):
-    message: str = Field(min_length=3, max_length=6000)
+    message: str = Field(min_length=1, max_length=6000)
     conversation_id: UUID | None = None
     client_request_id: UUID | None = None
     client_message_id: UUID | None = None
@@ -36,9 +54,23 @@ class PlanTripRequest(APIModel):
     answers: dict[str, AnswerValue] = Field(default_factory=dict)
     origin: LocationInput | None = None
     parent_run_id: UUID | None = None
+    intent: Intent | None = None
+    hotel_search: HotelSearchConstraints | None = None
+    selected_hotel: SelectedHotelContext | None = None
+    context: list[ConversationTurn] = Field(default_factory=list, max_length=12)
+
+    @field_validator("message")
+    @classmethod
+    def message_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("message cannot be blank")
+        return value
 
 
-class TripRequestDraft(APIModel):
+class DynamicTripDraft(APIModel):
+    intent: Intent | None = None
+    hotel_search_mode: HotelSearchMode | None = None
     destination: str | None = None
     origin: str | None = None
     travelers: int | None = Field(default=None, ge=1, le=50)
@@ -53,15 +85,23 @@ class TripRequestDraft(APIModel):
     pace: Literal["relaxed", "balanced", "active"] | None = None
     travel_mode: TravelMode = TravelMode.DRIVE
     dates_flexible: bool = True
+    hotel_search: HotelSearchConstraints | None = None
+    selected_hotel: SelectedHotelContext | None = None
 
     @model_validator(mode="after")
-    def derive_duration(self) -> TripRequestDraft:
+    def derive_duration(self) -> "DynamicTripDraft":
         if self.start_date and self.end_date:
             if self.end_date < self.start_date:
                 raise ValueError("end_date cannot be before start_date")
             if self.duration_days is None:
                 self.duration_days = (self.end_date - self.start_date).days + 1
         return self
+
+
+class TripRequestDraft(DynamicTripDraft):
+    """Backward-compatible name for the conversational trip draft."""
+
+    pass
 
 
 class TripRequirements(APIModel):
@@ -75,10 +115,11 @@ class TripRequirements(APIModel):
     budget_total: float | None = Field(default=None, ge=0)
     budget_band: Literal["economy", "balanced", "premium", "flexible"] = "flexible"
     currency: CurrencyCode = "USD"
-    interests: list[str] = Field(min_length=1, max_length=12)
+    interests: list[str] = Field(default_factory=list, max_length=12)
     preferences: list[str] = Field(default_factory=list, max_length=20)
     pace: Literal["relaxed", "balanced", "active"] = "balanced"
     travel_mode: TravelMode = TravelMode.DRIVE
+    selected_hotel: SelectedHotelContext | None = None
 
 
 class ClarificationOption(APIModel):
@@ -215,6 +256,37 @@ class TripPlan(APIModel):
     research_warnings: list[str] = Field(default_factory=list)
 
 
+class GooglePhotoPayload(APIModel):
+    name: str
+    width_px: int | None = Field(default=None, gt=0)
+    height_px: int | None = Field(default=None, gt=0)
+    author_name: str | None = None
+    author_uri: str | None = None
+    author_photo_uri: str | None = None
+    google_maps_uri: str | None = None
+    flag_content_uri: str | None = None
+
+
+class GoogleReviewPayload(APIModel):
+    name: str
+    rating: float = Field(ge=0, le=5)
+    text: str | None = None
+    relative_publish_time_description: str | None = None
+    publish_time: str | None = None
+    author_name: str | None = None
+    author_uri: str | None = None
+    author_photo_uri: str | None = None
+    google_maps_uri: str | None = None
+    flag_content_uri: str | None = None
+
+
+class GoogleOpeningHoursPayload(APIModel):
+    open_now: bool | None = None
+    weekday_descriptions: list[str] = Field(default_factory=list, max_length=7)
+    next_open_time: str | None = None
+    next_close_time: str | None = None
+
+
 class GooglePlacePayload(APIModel):
     id: str
     display_name: str
@@ -227,6 +299,14 @@ class GooglePlacePayload(APIModel):
     website_uri: str | None = None
     types: list[str] = Field(default_factory=list)
     price_level: str | None = None
+    business_status: str | None = None
+    national_phone_number: str | None = None
+    international_phone_number: str | None = None
+    editorial_summary: str | None = None
+    amenities: list[str] = Field(default_factory=list)
+    photos: list[GooglePhotoPayload] = Field(default_factory=list, max_length=10)
+    reviews: list[GoogleReviewPayload] = Field(default_factory=list, max_length=5)
+    opening_hours: GoogleOpeningHoursPayload | None = None
 
     @field_validator("display_name")
     @classmethod

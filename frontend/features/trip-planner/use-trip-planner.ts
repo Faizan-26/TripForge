@@ -9,13 +9,18 @@ import {
 } from "@/lib/trip-api/client";
 import {
   isClarificationResult,
+  isHotelSearchResult,
+  isGeneralAssistantResult,
   isTripPlan,
   type AnswerValue,
   type ClarificationResult,
   type ConversationDetail,
   type ConversationSummary,
+  type HotelPropertyCandidate,
+  type HotelSearchResult,
   type RunEvent,
   type RunStatus,
+  type SelectedHotelContext,
   type TripPlan,
 } from "@/lib/trip-api/types";
 
@@ -23,11 +28,27 @@ export type ThreadMessage = {
   id: string;
   role: "traveler" | "assistant";
   content: string;
-  artifact?: TripPlan | ClarificationResult;
+  artifact?: TripPlan | ClarificationResult | HotelSearchResult;
+};
+
+type StartRunOptions = {
+  answers?: Record<string, AnswerValue>;
+  parentRunId?: string;
+  intent?: "GENERAL" | "FULL_TRIP_PLAN" | "HOTEL_SEARCH";
+  selectedHotel?: SelectedHotelContext;
+  followUpLabel?: string;
 };
 
 function id() {
   return crypto.randomUUID();
+}
+
+function selectedHotelFromClarification(
+  clarification?: ClarificationResult,
+): SelectedHotelContext | undefined {
+  const selected = clarification?.draft?.selected_hotel;
+  if (!selected || typeof selected !== "object") return undefined;
+  return selected as SelectedHotelContext;
 }
 
 function hydrateConversation(detail?: ConversationDetail) {
@@ -37,7 +58,9 @@ function hydrateConversation(detail?: ConversationDetail) {
     prompt: "",
     status: undefined,
     plan: undefined,
+    hotelResult: undefined,
     clarification: undefined,
+    selectedHotel: undefined,
     error: "",
   };
   const artifacts = new Map(
@@ -65,16 +88,22 @@ function hydrateConversation(detail?: ConversationDetail) {
             : message.content,
           artifact: isTripPlan(artifact)
             ? artifact
-            : isClarificationResult(artifact)
+            : isHotelSearchResult(artifact)
               ? artifact
-              : undefined,
+              : isClarificationResult(artifact)
+                ? artifact
+                : undefined,
         };
       }),
     runId: latestRun?.id,
     prompt: detail.messages.find((message) => message.role === "user")?.content ?? "",
     status: latestRun?.status,
     plan: isTripPlan(latestPayload) ? latestPayload : undefined,
+    hotelResult: isHotelSearchResult(latestPayload) ? latestPayload : undefined,
     clarification: isClarificationResult(latestPayload) ? latestPayload : undefined,
+    selectedHotel: isClarificationResult(latestPayload)
+      ? selectedHotelFromClarification(latestPayload)
+      : undefined,
     error: latestRun?.error_message ?? "",
   };
 }
@@ -93,22 +122,22 @@ export function useTripPlanner(
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [clarification, setClarification] = useState<ClarificationResult | undefined>(initial.clarification);
   const [plan, setPlan] = useState<TripPlan | undefined>(initial.plan);
+  const [hotelResult, setHotelResult] = useState<HotelSearchResult | undefined>(initial.hotelResult);
+  const [selectedHotel, setSelectedHotel] = useState<SelectedHotelContext | undefined>(initial.selectedHotel);
   const [error, setError] = useState(initial.error);
   const [conversations, setConversations] = useState<ConversationSummary[]>(initialConversations);
 
   const busy = status === "queued" || status === "running";
 
   const startRun = useCallback(
-    async (
-      message: string,
-      options: { answers?: Record<string, AnswerValue>; parentRunId?: string } = {},
-    ) => {
+    async (message: string, options: StartRunOptions = {}) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
       setError("");
       setClarification(undefined);
       setPlan(undefined);
+      setHotelResult(undefined);
       setEvents([]);
       setStatus("queued");
 
@@ -119,13 +148,24 @@ export function useTripPlanner(
           { id: id(), role: "traveler", content: message },
         ]);
       } else {
+        if (options.intent === "FULL_TRIP_PLAN" && options.selectedHotel) {
+          setPrompt(message);
+        }
         setMessages((current) => [
           ...current,
-          { id: id(), role: "traveler", content: "I’ve added the missing trip details." },
+          {
+            id: id(),
+            role: "traveler",
+            content: options.followUpLabel ?? "I’ve added the missing trip details.",
+          },
         ]);
       }
 
       try {
+        const context = messages.slice(-10).map((item) => ({
+          role: item.role === "traveler" ? "user" as const : "assistant" as const,
+          content: item.content,
+        }));
         const created = await createTripRun(
           {
             message,
@@ -134,6 +174,9 @@ export function useTripPlanner(
             client_message_id: id(),
             answers: options.answers,
             parent_run_id: options.parentRunId,
+            intent: options.intent,
+            selected_hotel: options.selectedHotel,
+            context,
           },
           controller.signal,
         );
@@ -143,7 +186,7 @@ export function useTripPlanner(
           ? current
           : [{
               id: created.conversation_id,
-              title: message.slice(0, 120),
+              title: "New conversation",
               status: "active",
               last_message_at: new Date().toISOString(),
               created_at: new Date().toISOString(),
@@ -160,24 +203,56 @@ export function useTripPlanner(
               return [...current, event];
             });
             if (event.type === "run.started") setStatus("running");
+            if (event.type === "run.paused") setStatus("needs_clarification");
+            if (event.type === "run.completed") setStatus("completed");
             if (event.type === "run.failed") setStatus("failed");
+            const generatedTitle = event.data.conversation_title;
+            if (typeof generatedTitle === "string" && generatedTitle.trim()) {
+              setConversations((current) => current.map((item) =>
+                item.id === created.conversation_id
+                && ["New conversation", "New trip"].includes(item.title)
+                  ? { ...item, title: generatedTitle }
+                  : item));
+            }
           },
           controller.signal,
         );
 
         const snapshot = await getTripRun(created.run_id, controller.signal);
         setStatus(snapshot.status);
-        if (isClarificationResult(snapshot.result)) {
+        if (isGeneralAssistantResult(snapshot.result)) {
+          const result = snapshot.result;
+          setMessages((current) => [
+            ...current,
+            { id: id(), role: "assistant", content: result.message },
+          ]);
+        } else if (isClarificationResult(snapshot.result)) {
           setClarification(snapshot.result);
+          setSelectedHotel(
+            options.selectedHotel ?? selectedHotelFromClarification(snapshot.result),
+          );
           setMessages((current) => [
             ...current,
             { id: id(), role: "assistant", content: "A few choices will help me plan this properly." },
           ]);
         } else if (isTripPlan(snapshot.result)) {
           setPlan(snapshot.result);
+          setSelectedHotel(undefined);
           setMessages((current) => [
             ...current,
             { id: id(), role: "assistant", content: "Your route is ready. Here’s the complete plan." },
+          ]);
+        } else if (isHotelSearchResult(snapshot.result)) {
+          const result = snapshot.result;
+          setHotelResult(result);
+          setMessages((current) => [
+            ...current,
+            {
+              id: id(),
+              role: "assistant",
+              content: "I found grounded properties to compare. Choose one when you’re ready to shape the trip around it.",
+              artifact: result,
+            },
           ]);
         } else if (snapshot.error) {
           setError(snapshot.error);
@@ -188,15 +263,56 @@ export function useTripPlanner(
         setError(userFacingTripError(caught));
       }
     },
-    [conversationId],
+    [conversationId, messages],
   );
 
   const answerClarification = useCallback(
     (answers: Record<string, AnswerValue>) => {
       if (!runId || !prompt) return Promise.resolve();
-      return startRun(prompt, { answers, parentRunId: runId });
+      return startRun(prompt, {
+        answers,
+        parentRunId: runId,
+        intent: selectedHotel ? "FULL_TRIP_PLAN" : undefined,
+        selectedHotel,
+      });
     },
-    [prompt, runId, startRun],
+    [prompt, runId, selectedHotel, startRun],
+  );
+
+  const selectHotelAndPlan = useCallback(
+    (property: HotelPropertyCandidate) => {
+      if (!hotelResult) return Promise.resolve();
+      const offer = property.offers[0];
+      const selected: SelectedHotelContext = {
+        search_id: hotelResult.search_id,
+        property_id: property.property_id,
+        provider_ids: property.provider_ids,
+        name: property.name,
+        location: property.location,
+        selected_offer: offer,
+        check_in: offer?.availability.check_in ?? hotelResult.constraints.check_in,
+        check_out: offer?.availability.check_out ?? hotelResult.constraints.check_out,
+        selection_source: "traveler",
+      };
+      setSelectedHotel(selected);
+      const destination = hotelResult.constraints.destination_query
+        ?? hotelResult.constraints.location?.label
+        ?? property.location.city
+        ?? property.location.label;
+      const travelers = hotelResult.constraints.adults
+        ? ` for ${hotelResult.constraints.adults} traveler${hotelResult.constraints.adults === 1 ? "" : "s"}`
+        : "";
+      return startRun(
+        `Plan a trip to ${destination}${travelers} using my selected hotel, ${property.name}.`,
+        {
+          parentRunId: runId,
+          intent: "FULL_TRIP_PLAN",
+          selectedHotel: selected,
+          followUpLabel: `Use ${property.name} as my trip base.`,
+        },
+      );
+    },
+    [hotelResult, runId, startRun],
   );
 
   const reset = useCallback(() => {
@@ -210,6 +326,8 @@ export function useTripPlanner(
     setEvents([]);
     setClarification(undefined);
     setPlan(undefined);
+    setHotelResult(undefined);
+    setSelectedHotel(undefined);
     setError("");
   }, []);
 
@@ -223,10 +341,12 @@ export function useTripPlanner(
     events,
     clarification,
     plan,
+    hotelResult,
     error,
     busy,
     startRun,
     answerClarification,
+    selectHotelAndPlan,
     reset,
   };
 }

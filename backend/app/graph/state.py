@@ -4,6 +4,7 @@ from app.schemas.trip import (
     BudgetSummary,
     ClarificationQuestion,
     CompatibilityResult,
+    GeneralAssistantResult,
     ItineraryDay,
     MapRoute,
     PlanTripRequest,
@@ -14,6 +15,7 @@ from app.schemas.trip import (
     TripScope,
     ValidationIssue,
 )
+from app.schemas.hotel import HotelSearchConstraints, HotelSearchResult
 
 
 class TripState(TypedDict, total=False):
@@ -21,6 +23,10 @@ class TripState(TypedDict, total=False):
     draft: TripRequestDraft
     requirements: TripRequirements
     clarifications: list[ClarificationQuestion]
+    conversation_title: str
+    general_result: GeneralAssistantResult
+    hotel_search: HotelSearchConstraints
+    hotel_result: HotelSearchResult
     scope: TripScope
     stay_research: ResearchResult
     activity_research: ResearchResult
