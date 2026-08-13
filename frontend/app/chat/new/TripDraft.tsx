@@ -2,16 +2,14 @@
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { clearTripDraft, saveTripDraft, TRIP_DRAFT_KEY } from "@/lib/auth/pending-auth";
+import { ClarificationForm } from "@/features/trip-planner/ClarificationForm";
+import { PlanningProgress } from "@/features/trip-planner/PlanningProgress";
+import { TripPlanView } from "@/features/trip-planner/TripPlanView";
+import { useTripPlanner } from "@/features/trip-planner/use-trip-planner";
+import { clearTripDraft, TRIP_DRAFT_KEY } from "@/lib/auth/pending-auth";
 import { useSessionStorage } from "@/lib/browser/use-session-storage";
 import { signOut } from "./actions";
 import styles from "./chat.module.css";
-
-type Message = {
-  id: number;
-  role: "traveler" | "assistant";
-  content: string;
-};
 
 type Project = {
   id: string;
@@ -53,29 +51,37 @@ function RouteMark() {
   </svg>;
 }
 
-function buildAssistantReply(messageCount: number) {
-  return messageCount === 0
-    ? "I’ve got the idea. Add anything else that should shape the route—dates, budget, pace, or a must-do."
-    : "Added. Tell me anything else you want this trip to make room for.";
-}
-
 export function ChatWorkspace({ email }: { email: string }) {
   const draft = useSessionStorage(TRIP_DRAFT_KEY);
   const initialized = useRef(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [idea, setIdea] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const threadEndRef = useRef<HTMLDivElement>(null);
+  const {
+    messages,
+    status,
+    events,
+    clarification,
+    plan,
+    error,
+    busy,
+    startRun,
+    answerClarification,
+    reset,
+  } = useTripPlanner();
 
   useEffect(() => {
     if (!draft || initialized.current) return;
     initialized.current = true;
-    setMessages([
-      { id: 1, role: "traveler", content: draft },
-      { id: 2, role: "assistant", content: buildAssistantReply(0) },
-    ]);
-  }, [draft]);
+    clearTripDraft();
+    void startRun(draft);
+  }, [draft, startRun]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, events, clarification, plan, error]);
 
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -102,13 +108,8 @@ export function ChatWorkspace({ email }: { email: string }) {
     if (!content) return;
 
     initialized.current = true;
-    saveTripDraft(content);
-    setMessages((current) => [
-      ...current,
-      { id: Date.now(), role: "traveler", content },
-      { id: Date.now() + 1, role: "assistant", content: buildAssistantReply(current.length) },
-    ]);
     setIdea("");
+    void startRun(content);
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -121,12 +122,21 @@ export function ChatWorkspace({ email }: { email: string }) {
   function startNewTrip() {
     initialized.current = true;
     clearTripDraft();
-    setMessages([]);
+    reset();
     setIdea("");
     setSidebarOpen(false);
   }
 
   const initial = email === "Traveler" ? "T" : email.charAt(0).toUpperCase();
+  const statusText = busy
+    ? "Agents are planning"
+    : status === "needs_clarification"
+      ? "Waiting for your choices"
+      : status === "completed"
+        ? "Plan ready"
+        : status === "failed"
+          ? "Needs attention"
+          : "Ready when you are";
 
   return <main className={styles.page}>
     <button className={`${styles.scrim} ${sidebarOpen ? styles.scrimVisible : ""}`} type="button" aria-label="Close trip menu" onClick={() => setSidebarOpen(false)} />
@@ -162,7 +172,7 @@ export function ChatWorkspace({ email }: { email: string }) {
     <section className={styles.workspace}>
       <header className={styles.workspaceHeader}>
         <button className={styles.menuButton} type="button" onClick={() => setSidebarOpen(true)} aria-label="Open trip menu"><MenuIcon /></button>
-        <div><strong>New trip</strong><span><i /> Ready when you are</span></div>
+        <div><strong>{plan?.requirements.destination ?? "New trip"}</strong><span><i className={busy ? styles.statusBusy : ""} /> {statusText}</span></div>
       </header>
 
       <div className={`${styles.thread} ${messages.length === 0 ? styles.threadEmpty : ""}`}>
@@ -180,16 +190,21 @@ export function ChatWorkspace({ email }: { email: string }) {
             {message.role === "assistant" && <span className={styles.assistantMark}>TF</span>}
             <div><span>{message.role === "traveler" ? "You" : "TripForge"}</span><p>{message.content}</p></div>
           </article>)}
+          <PlanningProgress events={events} status={status} />
+          {clarification && <ClarificationForm clarification={clarification} disabled={busy} onSubmit={answerClarification} />}
+          {plan && <TripPlanView plan={plan} />}
+          {error && <section className={styles.runError} role="alert"><strong>Planning paused</strong><p>{error}</p><button type="button" onClick={() => reset()}>Start again</button></section>}
+          <div ref={threadEndRef} />
         </div>}
       </div>
 
       <div className={styles.composerWrap}>
         <form className={styles.composer} onSubmit={sendMessage}>
           <label htmlFor="trip-idea">Share your trip idea</label>
-          <textarea id="trip-idea" value={idea} onChange={(event) => setIdea(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="A week in northern Pakistan with mountains, local food, and a relaxed pace…" rows={1} />
-          <button type="submit" aria-label="Send trip idea" disabled={!idea.trim()}><ArrowIcon /></button>
+          <textarea id="trip-idea" value={idea} onChange={(event) => setIdea(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="A week in northern Pakistan with mountains, local food, and a relaxed pace…" rows={1} maxLength={6000} disabled={busy || Boolean(clarification)} />
+          <button type="submit" aria-label="Send trip idea" disabled={!idea.trim() || busy || Boolean(clarification)}><ArrowIcon /></button>
         </form>
-        <p>Enter to send · Shift + Enter for a new line</p>
+        <p>{clarification ? "Answer the questions above to continue" : busy ? "Your planning team is working" : "Enter to send · Shift + Enter for a new line"}</p>
       </div>
     </section>
   </main>;

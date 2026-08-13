@@ -585,6 +585,467 @@
   font-size: .66rem;
 }
 
+.statusBusy {
+  animation: statusPulse 1.6s ease-in-out infinite;
+}
+
+.progressPanel,
+.clarification,
+.plan,
+.runError {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.progressPanel {
+  padding: 22px;
+  border-radius: 18px;
+  background: #102b43;
+  color: #fffdf8;
+  box-shadow: 0 18px 44px rgba(16, 38, 60, .16);
+}
+
+.progressHeading,
+.agentProgress li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progressHeading > div,
+.agentProgress li > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.progressHeading strong,
+.agentProgress strong {
+  font-size: .82rem;
+}
+
+.progressHeading small,
+.agentProgress small {
+  color: #c7d2d8;
+  font-size: .7rem;
+  line-height: 1.45;
+}
+
+.liveDot,
+.agentActive,
+.agentDone {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.liveDot,
+.agentActive {
+  background: #d9ee36;
+  box-shadow: 0 2px 10px rgba(217, 238, 54, .38);
+}
+
+.agentDone {
+  background: #8da2ae;
+}
+
+.agentProgress {
+  margin: 20px 0 0;
+  padding: 18px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 22px;
+  border-top: 1px solid rgba(255, 253, 248, .15);
+  list-style: none;
+}
+
+.clarification {
+  padding: 26px;
+  border-radius: 18px;
+  background: #f1ede4;
+}
+
+.clarification h2,
+.planHeader h2 {
+  margin: 0;
+  font-size: clamp(1.65rem, 4vw, 2.4rem);
+  line-height: 1.05;
+  letter-spacing: -.03em;
+}
+
+.clarification > p {
+  margin: 8px 0 0;
+  color: #647484;
+  font-size: .85rem;
+}
+
+.questionList {
+  margin-top: 26px;
+  display: grid;
+  gap: 28px;
+}
+
+.questionList fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.questionList legend {
+  margin-bottom: 12px;
+  color: #10263c;
+  font-size: .86rem;
+  font-weight: 680;
+}
+
+.optionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.optionGrid label {
+  min-width: 0;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  border: 1px solid #c8d1ca;
+  border-radius: 12px;
+  background: #fffdf8;
+  cursor: pointer;
+}
+
+.optionGrid label:has(input:focus-visible) {
+  outline: 3px solid #294f6f;
+  outline-offset: 2px;
+}
+
+.optionGrid .optionSelected {
+  border-color: #294f6f;
+  background: #e7decd;
+}
+
+.optionGrid input {
+  width: 17px;
+  height: 17px;
+  accent-color: #102b43;
+}
+
+.optionGrid label > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.optionGrid strong {
+  font-size: .78rem;
+}
+
+.optionGrid small {
+  color: #647484;
+  font-size: .68rem;
+  line-height: 1.4;
+}
+
+.clarificationInput {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 14px;
+  border: 1px solid #c8d1ca;
+  border-radius: 12px;
+  background: #fffdf8;
+  color: #10263c;
+  font: inherit;
+  font-size: 1rem;
+}
+
+.formError {
+  margin: 18px 0 0;
+  color: #8e3e31;
+  font-size: .78rem;
+}
+
+.continueButton {
+  min-height: 48px;
+  margin-top: 22px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 18px;
+  background: #d9ee36;
+  color: #10263c;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 700;
+}
+
+.continueButton:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.plan {
+  display: grid;
+  gap: 26px;
+}
+
+.planHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid #d8ded7;
+}
+
+.planHeader p {
+  margin: 8px 0 0;
+  color: #647484;
+  font-size: .8rem;
+}
+
+.plan a {
+  color: #294f6f;
+  font-size: .74rem;
+  font-weight: 680;
+  text-underline-offset: 3px;
+}
+
+.staySummary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 16px;
+  background: #e7decd;
+}
+
+.staySummary > span {
+  padding: 7px 9px;
+  border-radius: 999px;
+  background: #102b43;
+  color: #fffdf8;
+  font-size: .65rem;
+  font-weight: 700;
+}
+
+.staySummary > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.staySummary strong {
+  font-size: .86rem;
+}
+
+.staySummary small {
+  color: #647484;
+  font-size: .7rem;
+}
+
+.itinerary {
+  display: grid;
+  gap: 32px;
+}
+
+.day {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 20px;
+}
+
+.dayNumber {
+  width: 58px;
+  height: 68px;
+  display: grid;
+  place-content: center;
+  border-radius: 16px;
+  background: #102b43;
+  color: #fffdf8;
+  text-align: center;
+}
+
+.dayNumber span {
+  color: #c7d2d8;
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.dayNumber strong {
+  color: #d9ee36;
+  font-size: 1.35rem;
+}
+
+.dayBody {
+  min-width: 0;
+  padding-bottom: 30px;
+  border-bottom: 1px solid #d8ded7;
+}
+
+.dayBody > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.dayBody h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.dayBody time {
+  display: block;
+  margin-top: 4px;
+  color: #647484;
+  font-size: .68rem;
+}
+
+.stops {
+  margin: 20px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+  list-style: none;
+}
+
+.stops li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.stops li > span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e7decd;
+  color: #10263c;
+  font-size: .66rem;
+  font-weight: 700;
+}
+
+.stops li > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.stops strong {
+  font-size: .82rem;
+}
+
+.stops small {
+  color: #647484;
+  font-size: .7rem;
+  line-height: 1.45;
+}
+
+.stops .noStops {
+  display: block;
+  color: #647484;
+  font-size: .75rem;
+}
+
+.routeMeta {
+  margin: 18px 0 0;
+  color: #647484;
+  font-size: .68rem;
+}
+
+.budget {
+  padding: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  border-radius: 18px;
+  background: #102b43;
+  color: #fffdf8;
+}
+
+.budget div {
+  display: grid;
+  gap: 4px;
+}
+
+.budget span {
+  color: #c7d2d8;
+  font-size: .67rem;
+}
+
+.budget strong {
+  font-size: 1.35rem;
+}
+
+.budget p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #c7d2d8;
+  font-size: .72rem;
+  line-height: 1.5;
+}
+
+.planNotes {
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: #f1ede4;
+  color: #394f62;
+}
+
+.planNotes summary {
+  font-size: .76rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.planNotes ul {
+  margin: 14px 0 0;
+  padding-inline-start: 18px;
+  color: #647484;
+  font-size: .72rem;
+  line-height: 1.55;
+}
+
+.runError {
+  padding: 20px;
+  border-radius: 16px;
+  background: #f7ebe7;
+  color: #713329;
+}
+
+.runError strong {
+  font-size: .85rem;
+}
+
+.runError p {
+  margin: 6px 0 14px;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.runError button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: #102b43;
+  color: #fffdf8;
+  font: inherit;
+  font-size: .74rem;
+  font-weight: 680;
+}
+
 .scrim {
   display: none;
 }
@@ -602,6 +1063,10 @@
 @keyframes accountMenuIn {
   from { opacity: .6; transform: translateY(8px) scale(.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes statusPulse {
+  50% { opacity: .45; transform: scale(.75); }
 }
 
 @media (max-width: 840px) {
@@ -668,6 +1133,11 @@
     padding-right: 16px;
     padding-left: 16px;
   }
+
+  .agentProgress,
+  .optionGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
@@ -727,6 +1197,36 @@
 
   .composerWrap > p {
     display: none;
+  }
+
+  .clarification {
+    padding: 20px;
+  }
+
+  .planHeader,
+  .dayBody > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .staySummary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .staySummary > span {
+    grid-column: 1 / -1;
+    width: fit-content;
+  }
+
+  .day {
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 13px;
+  }
+
+  .dayNumber {
+    width: 46px;
+    height: 58px;
   }
 }
 

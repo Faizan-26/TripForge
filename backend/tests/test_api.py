@@ -1,0 +1,108 @@
+import asyncio
+
+from httpx import ASGITransport, AsyncClient
+
+from app.core.config import Settings
+from app.llm.local import LocalPlanningModel
+from app.main import create_app
+from tests.fakes import FakeGoogleMapsClient
+
+
+async def test_health_run_status_and_replayable_sse() -> None:
+    maps = FakeGoogleMapsClient()
+    app = create_app(
+        settings=Settings(
+            supabase_auth_required=False,
+            openai_api_key=None,
+            google_maps_api_key="fake",
+            sse_heartbeat_seconds=5,
+        ),
+        planning_model=LocalPlanningModel(),
+        maps_client=maps,
+    )
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            health = await client.get("/health")
+            assert health.status_code == 200
+            assert set(health.json()["capabilities"]) == {
+                "planning_model",
+                "llm_configured",
+                "google_maps_configured",
+                "supabase_configured",
+                "run_store",
+            }
+
+            created = await client.post(
+                "/api/v1/trips/runs",
+                json={
+                    "message": (
+                        "Plan a relaxed 3-day trip from Lahore to Islamabad for two people "
+                        "under $1500. We like food and culture."
+                    )
+                },
+            )
+            assert created.status_code == 202
+            run_id = created.json()["run_id"]
+
+            snapshot = None
+            for _ in range(100):
+                snapshot = await client.get(f"/api/v1/runs/{run_id}")
+                if snapshot.json()["status"] in {"completed", "failed"}:
+                    break
+                await asyncio.sleep(0.01)
+
+            assert snapshot is not None
+            assert snapshot.json()["status"] == "completed"
+            assert snapshot.json()["result"]["status"] == "valid"
+
+            events = await client.get(f"/api/v1/runs/{run_id}/events")
+            assert events.status_code == 200
+            assert "event: run.started" in events.text
+            assert "event: agent.started" in events.text
+            assert "event: run.completed" in events.text
+
+            replay = await client.get(
+                f"/api/v1/runs/{run_id}/events",
+                headers={"Last-Event-ID": "1"},
+            )
+            assert "id: 1\n" not in replay.text
+            assert "event: run.completed" in replay.text
+
+    assert maps.closed is True
+
+
+async def test_api_returns_mcq_clarification_payload() -> None:
+    app = create_app(
+        settings=Settings(
+            openai_api_key=None,
+            google_maps_api_key="fake",
+            supabase_auth_required=False,
+        ),
+        planning_model=LocalPlanningModel(),
+        maps_client=FakeGoogleMapsClient(),
+    )
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            created = await client.post(
+                "/api/v1/trips/runs",
+                json={"message": "Plan a trip to Islamabad"},
+            )
+            run_id = created.json()["run_id"]
+            for _ in range(100):
+                snapshot = await client.get(f"/api/v1/runs/{run_id}")
+                if snapshot.json()["status"] == "needs_clarification":
+                    break
+                await asyncio.sleep(0.01)
+
+            payload = snapshot.json()
+            assert payload["status"] == "needs_clarification"
+            questions = {question["id"]: question for question in payload["result"]["questions"]}
+            assert questions["travelers"]["kind"] == "single_select"
+            assert questions["travelers"]["options"]
+            assert questions["interests"]["kind"] == "multi_select"
