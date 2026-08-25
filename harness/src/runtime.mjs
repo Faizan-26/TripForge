@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 export class FakeRuntime {
   async *execute() {
@@ -35,7 +36,16 @@ export class DeepSeekCliRuntime {
     await fs.mkdir(workspace, { recursive: true });
     const task = buildTask(request);
     const { command, args } = commandFor(this.config, this.platform, task);
-    const output = await runProcess({
+    const queuedProgress = [];
+    let wake;
+    let finished = false;
+    let output;
+    let failure;
+    const stderr = createProgressParser(request.run_id, (event) => {
+      queuedProgress.push(progress(event.agent, event.message, event.data, event.type));
+      wake?.();
+    });
+    const running = runProcess({
       command,
       args,
       cwd: workspace,
@@ -43,12 +53,37 @@ export class DeepSeekCliRuntime {
         ...process.env,
         DSH_HOME: this.config.dshHome,
         DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE ?? "read-only",
+        DSH_TRIPFORGE_GOOGLE_PLACES_PLUGIN: pathToFileURL(
+          this.config.googlePlacesPlugin,
+        ).href,
+        DSH_TRIPFORGE_PROGRESS_PLUGIN: pathToFileURL(this.config.progressPlugin).href,
       },
       timeoutMs: this.config.timeoutMs,
       maxOutputBytes: this.config.maxOutputBytes,
       signal,
-      onStderr: (line) => process.stderr.write(`[dsh:${request.run_id}] ${line}`),
+      onStderr: (chunk) => stderr.push(chunk),
+    }).then(
+      (value) => { output = value; },
+      (error) => { failure = error; },
+    ).finally(() => {
+      stderr.flush();
+      finished = true;
+      wake?.();
     });
+
+    while (!finished || queuedProgress.length > 0) {
+      if (queuedProgress.length > 0) {
+        yield queuedProgress.shift();
+        continue;
+      }
+      await new Promise((resolve) => {
+        wake = resolve;
+        if (finished || queuedProgress.length > 0) resolve();
+      });
+      wake = undefined;
+    }
+    await running;
+    if (failure) throw failure;
 
     process.stdout.write(`[harness] run ${request.run_id} completed\n`);
     yield completed(parseHarnessResult(output, request.conversation_id));
@@ -99,6 +134,9 @@ Ask only questions required to proceed. For a full trip plan, required basics ar
 destination, traveler count, and either dates or duration. Research and itinerary
 generation are not enabled in this migration slice, so if those basics are present,
 state that tool-backed planning is still being connected instead of fabricating a plan.
+When search_google_places is available, use it for current place, hotel, restaurant,
+and attraction discovery questions. Base claims only on its results and retain provider
+IDs and Google Maps links when they are useful to the traveler.
 Use select fields only when you supply options. Use date for a single ISO date, boolean
 for yes/no, and textarea only when a longer answer is genuinely useful. Never return
 HTML, JavaScript, CSS, URLs for UI controls, or an unlisted question kind.`;
@@ -235,6 +273,47 @@ function withMetadata(state, sessionId) {
   };
 }
 
+export function parseProgressLine(line) {
+  const prefix = "TRIPFORGE_PROGRESS\t";
+  if (!line.startsWith(prefix)) return undefined;
+  try {
+    const value = JSON.parse(line.slice(prefix.length));
+    if (!isRecord(value) || typeof value.message !== "string") return undefined;
+    const supported = new Set(["tool.started", "tool.completed", "tool.failed"]);
+    return {
+      type: supported.has(value.type) ? value.type : "tool.progress",
+      agent: typeof value.agent === "string" ? value.agent.slice(0, 100) : "supervisor",
+      message: value.message.slice(0, 300),
+      data: isRecord(value.data) ? value.data : {},
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function createProgressParser(runId, onProgress) {
+  let buffer = "";
+  const handle = (line) => {
+    const event = parseProgressLine(line);
+    if (event) onProgress(event);
+    else if (line) process.stderr.write(`[dsh:${runId}] ${line}\n`);
+  };
+  return {
+    push(chunk) {
+      buffer += chunk;
+      let newline;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        handle(buffer.slice(0, newline).replace(/\r$/u, ""));
+        buffer = buffer.slice(newline + 1);
+      }
+    },
+    flush() {
+      if (buffer) handle(buffer.replace(/\r$/u, ""));
+      buffer = "";
+    },
+  };
+}
+
 function runProcess({
   command,
   args,
@@ -300,8 +379,8 @@ function runProcess({
   });
 }
 
-function progress(agent, message, data = {}) {
-  return { kind: "progress", type: "agent.progress", agent, message, data };
+function progress(agent, message, data = {}, type = "agent.progress") {
+  return { kind: "progress", type, agent, message, data };
 }
 
 function completed(state) {

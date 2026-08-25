@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { commandFor, FakeRuntime, parseHarnessResult } from "../src/runtime.mjs";
+import {
+  commandFor,
+  FakeRuntime,
+  parseHarnessResult,
+  parseProgressLine,
+} from "../src/runtime.mjs";
+import { formatProgressLine } from "../plugins/progress/index.mjs";
 import { createServer, validateExecuteRequest } from "../src/server.mjs";
 
 test("Windows uses the cmd npx shim without a shell", () => {
@@ -33,6 +39,22 @@ test("fake runtime emits progress followed by completion", async () => {
 
 test("execution contract rejects missing identifiers", () => {
   assert.throws(() => validateExecuteRequest({ message: "Plan a trip" }), /run_id/);
+});
+
+test("Harness progress frames become public tool events without exposing arbitrary types", () => {
+  const event = parseProgressLine(formatProgressLine({
+    type: "tool.started",
+    agent: "supervisor",
+    message: "Google Places search running",
+    data: { tool: "search_google_places" },
+  }).trimEnd());
+  assert.deepEqual(event, {
+    type: "tool.started",
+    agent: "supervisor",
+    message: "Google Places search running",
+    data: { tool: "search_google_places" },
+  });
+  assert.equal(parseProgressLine("ordinary stderr"), undefined);
 });
 
 test("structured clarification output maps to backend state", () => {
@@ -98,6 +120,14 @@ test("HTTP service authenticates and streams NDJSON", async (context) => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   context.after(() => new Promise((resolve) => server.close(resolve)));
   const { port } = server.address();
+
+  const health = await fetch(`http://127.0.0.1:${port}/health`);
+  assert.deepEqual(await health.json(), {
+    status: "ok",
+    mode: "fake",
+    platform: process.platform,
+    plugins: { progress: false, google_places: false },
+  });
 
   const unauthorized = await fetch(`http://127.0.0.1:${port}/internal/v1/execute`, {
     method: "POST",

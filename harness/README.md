@@ -126,12 +126,94 @@ The checked-in scaffold is intentionally smaller than the target layout:
 - `src/server.mjs` provides health and authenticated NDJSON execution endpoints.
 - `src/runtime.mjs` provides deterministic fake mode and the native CLI adapter.
 - `src/config.mjs` validates runtime configuration.
-- `test/runtime.test.mjs` verifies the Windows command and execution contract.
+- `plugins/progress` emits sanitized tool lifecycle events into the existing NDJSON/SSE path.
+- `plugins/google-places` registers the typed, read-only `search_google_places` tool.
+- `test/` verifies Windows startup, contracts, progress framing, provider normalization,
+  cancellation boundaries, and safe provider failures without using live credentials.
 
 Fake mode and the official Node CLI run natively on Windows. The published Python
 SDK's persistent PTY composition still requires POSIX, so TripForge uses the Node
 headless profile on Windows and keeps the Python SDK out of this service. Production
 should still use a pinned package and a least-privilege preset with narrow travel tools.
+
+## Migration checkpoint — 2026-08-25
+
+This is the continuation point for `feature/deepseek-harness`.
+
+### Completed
+
+- [x] Created an independently runnable Node Harness service under `harness/`.
+- [x] Added authenticated `POST /internal/v1/execute` NDJSON execution and `/health`.
+- [x] Added fake and native DeepSeek CLI runtime modes with Windows-safe process startup,
+  cancellation, timeouts, output limits, and stderr logging.
+- [x] Added the FastAPI `AgentRuntime` boundary with LangGraph and private Harness HTTP
+  adapters; the browser continues to call FastAPI only.
+- [x] Added `AGENT_RUNTIME=langgraph|deepseek`, Harness service settings, health reporting,
+  and shutdown handling in FastAPI.
+- [x] Pinned DeepSeek Harness `0.1.1-rc.2` and added the least-privilege
+  `config/tripforge.patch.yml` composition.
+- [x] Disabled generic coding, filesystem, shell, interactive-question, browser-search,
+  workflow, telemetry, and task-management plugins that TripForge does not need.
+- [x] Added schema-v1 headless clarification output with normalization in Harness and a
+  second validation boundary in FastAPI.
+- [x] Added a flexible frontend question renderer for select, multi-select, text,
+  textarea, location, number, date, and boolean fields.
+- [x] Preserved the FastAPI/SSE pause-and-resume flow using `parent_run_id`; Harness
+  credentials and provider keys never reach the browser.
+- [x] Added the `tripforge-progress` plugin and runtime framing for sanitized
+  `tool.started`, `tool.completed`, and `tool.failed` events.
+- [x] Added the typed, read-only `search_google_places` plugin with bounded requests,
+  fixed-host enforcement, cancellation, normalized provider IDs, and native Harness
+  inspector presentation metadata.
+- [x] Added plugin activation reporting to Harness `/health`.
+- [x] Added mocked Google provider, plugin-registration, progress-contract, HTTP, and
+  Windows launcher tests. The Harness suite last passed with 15 tests; the Next.js
+  production build and ESLint also passed during this checkpoint.
+- [x] Verified both custom plugins load in the pinned real Headless Cordis composition
+  using `dsh --profile headless --patch ... --help`, without making a model call.
+
+### Started but incomplete
+
+- [ ] Run a live `search_google_places` prompt with a restricted Google key and inspect
+  the resulting model/tool behavior. Unit tests currently use mocked responses only.
+- [ ] Add a `tripforge-inspector` Web profile/launcher using the same tools and permission
+  policy as production so Trajectory can show agents, calls, inputs/outputs, and timing.
+- [ ] Expand progress streaming beyond tool lifecycle to safe agent/subagent and model
+  request lifecycle events; never expose hidden reasoning.
+- [ ] Implement durable Harness session continuation. Clarification currently resumes at
+  the TripForge/FastAPI contract level, but the CLI adapter does not yet invoke native
+  `dsh --resume` session continuation.
+- [ ] Restore and run the backend Python test suite. The checked-in Windows virtual
+  environment currently points to a missing Microsoft Store Python executable.
+
+### Not started
+
+- [ ] `google-routes` plugin for route matrices, travel durations, distances, and route
+  geometry.
+- [ ] `tripvlog-properties` plugin for hotel offers, availability, rooms, reviews, and
+  media.
+- [ ] Optional weather, currency, timezone, and official travel-advisory plugins.
+- [ ] Specialized Trip Scope, Stay Research, Activity Research, Travel Research,
+  Compatibility, Itinerary, Budget, and Validator Harness agent presets.
+- [ ] Deterministic compatibility, budget, and validation modules callable by those
+  agents.
+- [ ] Versioned Harness hotel-search and full `TripPlan` result production. The current
+  native migration slice returns general or clarification results only.
+- [ ] Approval plugin and FastAPI confirmation boundary for any future booking/write
+  action.
+- [ ] Shadow comparison against LangGraph, quality/cost/latency evaluation, DeepSeek
+  cutover, rollback window, and removal of the legacy graph implementation.
+- [ ] Durable shared run/event infrastructure for multiple FastAPI workers.
+
+### Recommended next session
+
+1. Recreate the backend virtual environment and run all Python tests.
+2. Add the inspector launcher and perform one live, read-only Google Places prompt.
+3. Implement `google-routes` with the same typed-tool and mocked-provider pattern.
+4. Add versioned hotel/plan result contracts before introducing specialized agents.
+
+Before committing, keep `harness/.env`, `backend/.env`, `.dsh-runtime/`, and
+`.workspaces/` untracked, and rotate any API key that has appeared in chat or screenshots.
 
 ### Active TripForge plugin policy
 
@@ -173,6 +255,28 @@ $env:HARNESS_MODE="fake"
 $env:HARNESS_SERVICE_TOKEN="local-development-token"
 npm.cmd start
 ```
+
+### Enable the first real provider plugin
+
+Set `GOOGLE_MAPS_API_KEY` in `harness/.env` to enable `search_google_places`. The
+key must be authorized for Google Places API (New). During migration the backend
+may still have its own copy; after the legacy agent path is removed, keep the
+provider credential only with the Harness service.
+
+The plugin sends the key in the Google header, never a URL, and accepts only the
+fixed HTTPS `places.googleapis.com` endpoint. It caps calls at 10 results, bounds
+provider strings, rejects invalid coordinate/radius biases, forwards cancellation,
+and strips unsupported fields before the model sees results. Calls are read-only
+and concurrency-safe only after their arguments pass Harness schema validation.
+
+Check activation without exposing the key:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8090/health
+```
+
+The response reports `plugins.google_places: true`. Tool start/completion/failure
+events then stream through FastAPI to the existing frontend planning indicator.
 
 ## Migration plan
 

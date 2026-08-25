@@ -34,8 +34,17 @@ export function loadConfig(env = process.env) {
     tripforgePatch: path.resolve(
       env.DSH_TRIPFORGE_PATCH ?? path.join(harnessRoot, "config", "tripforge.patch.yml"),
     ),
+    googlePlacesPlugin: path.resolve(
+      env.TRIPFORGE_GOOGLE_PLACES_PLUGIN_PATH
+        ?? path.join(harnessRoot, "plugins", "google-places", "index.mjs"),
+    ),
+    progressPlugin: path.resolve(
+      env.TRIPFORGE_PROGRESS_PLUGIN_PATH
+        ?? path.join(harnessRoot, "plugins", "progress", "index.mjs"),
+    ),
     dshCommand: env.DSH_COMMAND || localDshCommand(process.platform),
     dshPackage: env.DSH_PACKAGE ?? "@deepseek-ai/dsh",
     model: env.DSH_MODEL,
+    googlePlacesEnabled: Boolean(env.GOOGLE_MAPS_API_KEY),
   };
 }

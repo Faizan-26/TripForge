@@ -10,7 +10,15 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
   return http.createServer(async (request, response) => {
     try {
       if (request.method === "GET" && request.url === "/health") {
-        return json(response, 200, { status: "ok", mode: config.mode, platform: process.platform });
+        return json(response, 200, {
+          status: "ok",
+          mode: config.mode,
+          platform: process.platform,
+          plugins: {
+            progress: config.mode === "deepseek",
+            google_places: config.mode === "deepseek" && Boolean(config.googlePlacesEnabled),
+          },
+        });
       }
       if (request.method !== "POST" || request.url !== "/internal/v1/execute") {
         return json(response, 404, { detail: "Not found" });

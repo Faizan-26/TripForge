@@ -14,6 +14,22 @@
       Coordinate specialized travel agents over approved, grounded tools.
       Never invent provider entities, prices, availability, routes, or bookings.
 
+# First TripForge-owned provider plugin. A missing key disables the complete row,
+# so general and clarification runs remain usable without a Google configuration.
+- insert:
+    - id: tripforge-progress
+      name: !!js process.env.DSH_TRIPFORGE_PROGRESS_PLUGIN
+      inject: [tools]
+
+    - id: tripforge-google-places
+      name: !!js process.env.DSH_TRIPFORGE_GOOGLE_PLACES_PLUGIN
+      disabled: !!js Boolean(process.env.GOOGLE_MAPS_API_KEY) === false
+      inject: [tools, systemPrompt]
+      config:
+        apiKeyEnv: GOOGLE_MAPS_API_KEY
+        maxResults: 8
+        timeoutMs: 15000
+
 # Extra model calls and interactive/browser-only facilities.
 - id: session-title
   disabled: true
