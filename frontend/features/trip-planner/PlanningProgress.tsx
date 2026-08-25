@@ -13,6 +13,10 @@ const thinkingLabels: Record<string, string> = {
   itinerary: "Building each day",
   budget: "Checking the budget",
   validator: "Reviewing the final plan",
+  stay_research: "Researching where to stay",
+  activity_research: "Finding useful places",
+  travel_research: "Checking travel context",
+  compatibility_ranking: "Balancing distance and pace",
 };
 
 export function PlanningProgress({ events, status }: { events: RunEvent[]; status?: RunStatus }) {

@@ -58,6 +58,34 @@ assistant message. Run status and SSE endpoints enforce the same authenticated o
 
 The API is available at `http://localhost:8000`, with Swagger UI at `/docs`.
 
+## DeepSeek Harness migration mode
+
+The browser API and SSE contract can now run through either the existing LangGraph
+runtime or the separate service in `../harness`.
+
+Start the local harness in deterministic fake mode (use a real random token outside
+local development):
+
+```powershell
+cd harness
+$env:HARNESS_MODE="fake"
+$env:HARNESS_SERVICE_TOKEN="local-development-token"
+npm.cmd start
+```
+
+Then configure FastAPI:
+
+```dotenv
+AGENT_RUNTIME=deepseek
+HARNESS_URL=http://127.0.0.1:8090
+HARNESS_SERVICE_TOKEN=local-development-token
+```
+
+Fake mode validates service authentication, streaming, persistence, and UI wiring.
+It does not plan trips. DeepSeek mode uses the official Node headless CLI and can run
+natively on Windows through `npx.cmd`; production should pin the package and use a
+least-privilege preset.
+
 - An OpenAI key enables structured LLM intake, geographic scoping, and itinerary
   arrangement. Without it, a deliberately limited parser remains available.
 - A Google Maps server key with Places API (New) and Routes API enabled is required for
@@ -88,9 +116,11 @@ curl -N http://localhost:8000/api/v1/runs/RUN_ID/events
 Because native browser `EventSource` cannot set an Authorization header, use a streaming
 `fetch` client or a same-origin Next.js proxy for authenticated SSE.
 
-If the run pauses with `needs_clarification`, render the returned question schemas as
-single-select, multi-select, text, or location controls. Start a new run with the same
-message, the answers, and `parent_run_id`:
+If the run pauses with `needs_clarification`, the result contains
+`ui_schema_version: "1"` and validated question schemas. The web renderer supports
+single-select, multi-select, text, long text, location, number, date, and boolean
+controls, plus bounded presentation hints. Start a new run with the same message, the
+answers, and `parent_run_id`:
 
 ```json
 {

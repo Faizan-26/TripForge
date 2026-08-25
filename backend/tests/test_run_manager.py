@@ -7,6 +7,7 @@ import pytest
 from app.harness.runs import InMemoryRunManager, RunNotFoundError
 from app.schemas.events import RunEvent, RunSnapshot, RunStatus
 from app.schemas.trip import PlanTripRequest
+from app.runtime.langgraph import LangGraphRuntime
 
 
 class _FailingGraph:
@@ -50,7 +51,7 @@ class _DurableReadRepository:
 
 async def test_run_manager_reports_sanitized_graph_failures_and_events() -> None:
     manager = InMemoryRunManager(
-        _FailingGraph(),
+        LangGraphRuntime(_FailingGraph()),
         retention_seconds=60,
         heartbeat_seconds=1,
     )
@@ -78,7 +79,7 @@ async def test_run_manager_reports_sanitized_graph_failures_and_events() -> None
 
 async def test_live_subscriber_receives_terminal_event_before_stream_closes() -> None:
     manager = InMemoryRunManager(
-        _CompletingGraph(),
+        LangGraphRuntime(_CompletingGraph()),
         retention_seconds=60,
         heartbeat_seconds=1,
     )
@@ -99,7 +100,7 @@ async def test_live_subscriber_receives_terminal_event_before_stream_closes() ->
 
 async def test_run_manager_rejects_unknown_run_ids() -> None:
     manager = InMemoryRunManager(
-        _FailingGraph(),
+        LangGraphRuntime(_FailingGraph()),
         retention_seconds=60,
         heartbeat_seconds=1,
     )
@@ -128,7 +129,7 @@ async def test_run_manager_reads_completed_snapshot_and_events_after_restart() -
         message="Trip planning completed",
     )
     manager = InMemoryRunManager(
-        _FailingGraph(),
+        LangGraphRuntime(_FailingGraph()),
         retention_seconds=60,
         heartbeat_seconds=1,
         repository=_DurableReadRepository(snapshot, [event]),

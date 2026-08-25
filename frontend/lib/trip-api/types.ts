@@ -48,12 +48,29 @@ export type ClarificationOption = {
 export type ClarificationQuestion = {
   id: string;
   prompt: string;
-  kind: "single_select" | "multi_select" | "text" | "location" | "number";
+  kind:
+    | "single_select"
+    | "multi_select"
+    | "text"
+    | "textarea"
+    | "location"
+    | "number"
+    | "date"
+    | "boolean";
   required: boolean;
   options: ClarificationOption[];
+  description?: string | null;
+  placeholder?: string | null;
+  allow_other?: boolean;
+  min_value?: number | null;
+  max_value?: number | null;
+  step?: number | null;
+  min_length?: number | null;
+  max_length?: number | null;
 };
 
 export type ClarificationResult = {
+  ui_schema_version?: "1";
   draft?: Record<string, unknown> | null;
   questions: ClarificationQuestion[];
 };
@@ -416,12 +433,28 @@ export type ConversationDetail = {
 };
 
 export function isClarificationResult(value: unknown): value is ClarificationResult {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && "questions" in value
-    && Array.isArray(value.questions),
-  );
+  if (!value || typeof value !== "object" || !("questions" in value)) return false;
+  if ("ui_schema_version" in value && value.ui_schema_version !== "1") return false;
+  if (!Array.isArray(value.questions) || value.questions.length === 0) return false;
+  const kinds = new Set([
+    "single_select", "multi_select", "text", "textarea", "location", "number", "date", "boolean",
+  ]);
+  return value.questions.every((question: unknown) => {
+    if (!question || typeof question !== "object") return false;
+    if (!("id" in question) || typeof question.id !== "string" || !question.id) return false;
+    if (!("prompt" in question) || typeof question.prompt !== "string" || !question.prompt) return false;
+    if (!("kind" in question) || typeof question.kind !== "string" || !kinds.has(question.kind)) return false;
+    if (!("required" in question) || typeof question.required !== "boolean") return false;
+    if (!("options" in question) || !Array.isArray(question.options)) return false;
+    return question.options.every((option: unknown) => Boolean(
+      option
+      && typeof option === "object"
+      && "value" in option
+      && typeof option.value === "string"
+      && "label" in option
+      && typeof option.label === "string",
+    ));
+  });
 }
 
 export function isTripPlan(value: unknown): value is TripPlan {

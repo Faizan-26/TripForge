@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -9,10 +8,10 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
+from app.runtime.base import AgentRuntime, RuntimeCompleted
 from app.schemas.events import RunEvent, RunSnapshot, RunStatus
-from app.schemas.trip import PlanTripRequest
+from app.schemas.trip import ClarificationQuestion, PlanTripRequest
 from app.supabase import TripRepository
-from app.services.langsmith import trace_config
 
 logger = logging.getLogger(__name__)
 DEV_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -58,13 +57,13 @@ class InMemoryRunManager:
 
     def __init__(
         self,
-        graph: Any,
+        runtime: AgentRuntime,
         *,
         retention_seconds: int,
         heartbeat_seconds: int,
         repository: TripRepository | None = None,
     ) -> None:
-        self._graph = graph
+        self._runtime = runtime
         self._retention = timedelta(seconds=retention_seconds)
         self.heartbeat_seconds = heartbeat_seconds
         self._records: dict[UUID, RunRecord] = {}
@@ -175,6 +174,7 @@ class InMemoryRunManager:
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self._runtime.close()
 
     async def _execute_after_response(self, record: RunRecord) -> None:
         # Give the API handler a scheduling turn to send its 202 response before
@@ -202,37 +202,33 @@ class InMemoryRunManager:
                     )
                 },
             )
-            stream_kwargs = {
-                "stream_mode": ["custom", "values"],
-                "version": "v2",
-            }
-            # Keep lightweight graph doubles used by tests/backfills compatible
-            # while passing full LangSmith metadata to real LangGraph graphs.
-            if "config" in inspect.signature(self._graph.astream).parameters:
-                stream_kwargs["config"] = trace_config(
-                    run_id=record.run_id,
-                    conversation_id=record.conversation_id,
-                    parent_run_id=record.request.parent_run_id,
-                )
-            async for part in self._graph.astream(
-                {"request": record.request}, **stream_kwargs
+            async for update in self._runtime.execute(
+                record.request,
+                run_id=record.run_id,
+                conversation_id=record.conversation_id,
             ):
-                if part["type"] == "custom":
-                    payload = part["data"]
+                if not isinstance(update, RuntimeCompleted):
                     await self._publish(
                         record,
-                        event_type=payload.get("type", "run.progress"),
-                        agent=payload.get("agent"),
-                        message=payload.get("message", "Planning update"),
-                        data=_jsonable(payload.get("data", {})),
+                        event_type=update.type,
+                        agent=update.agent,
+                        message=update.message,
+                        data=_jsonable(update.data),
                     )
-                elif part["type"] == "values":
-                    final_state = part["data"]
+                else:
+                    final_state = update.state
 
             if final_state.get("clarifications"):
+                questions = [
+                    ClarificationQuestion.model_validate(_jsonable(question)).model_dump(
+                        mode="json"
+                    )
+                    for question in final_state["clarifications"]
+                ]
                 record.result = {
+                    "ui_schema_version": "1",
                     "draft": _jsonable(final_state.get("draft")),
-                    "questions": _jsonable(final_state["clarifications"]),
+                    "questions": questions,
                 }
                 if self._repository:
                     await self._repository.save_result(

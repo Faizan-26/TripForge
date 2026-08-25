@@ -14,6 +14,9 @@ from app.graph.builder import build_trip_graph
 from app.harness.runs import InMemoryRunManager
 from app.llm.base import PlanningModel
 from app.llm.factory import build_planning_model
+from app.runtime.base import AgentRuntime
+from app.runtime.harness_http import HarnessHttpRuntime
+from app.runtime.langgraph import LangGraphRuntime
 from app.supabase import SupabaseGateway
 from app.services.langsmith import configure_langsmith
 from app.tools.google_maps import GoogleMapsClient
@@ -25,6 +28,7 @@ def create_app(
     planning_model: PlanningModel | None = None,
     maps_client: GoogleMapsClient | None = None,
     graph: Any | None = None,
+    runtime: AgentRuntime | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
     langsmith_enabled = configure_langsmith(app_settings)
@@ -33,11 +37,20 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         model = planning_model or build_planning_model(app_settings)
         maps = maps_client or GoogleMapsClient(app_settings.google_maps_api_key)
-        compiled_graph = graph or build_trip_graph(
-            settings=app_settings,
-            model=model,
-            maps=maps,
-        )
+        selected_runtime = runtime
+        if selected_runtime is None and app_settings.agent_runtime == "deepseek":
+            selected_runtime = HarnessHttpRuntime(
+                base_url=app_settings.harness_url,
+                service_token=app_settings.harness_service_token.get_secret_value(),
+                timeout_seconds=app_settings.harness_timeout_seconds,
+            )
+        if selected_runtime is None:
+            compiled_graph = graph or build_trip_graph(
+                settings=app_settings,
+                model=model,
+                maps=maps,
+            )
+            selected_runtime = LangGraphRuntime(compiled_graph)
         supabase = None
         if (
             app_settings.supabase_auth_required
@@ -47,7 +60,7 @@ def create_app(
         ):
             supabase = SupabaseGateway(app_settings)
         manager = InMemoryRunManager(
-            compiled_graph,
+            selected_runtime,
             retention_seconds=app_settings.run_retention_seconds,
             heartbeat_seconds=app_settings.sse_heartbeat_seconds,
             repository=supabase,

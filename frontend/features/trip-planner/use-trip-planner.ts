@@ -135,7 +135,7 @@ export function useTripPlanner(
       const controller = new AbortController();
       abortRef.current = controller;
       setError("");
-      setClarification(undefined);
+      if (!options.parentRunId) setClarification(undefined);
       setPlan(undefined);
       setHotelResult(undefined);
       setEvents([]);
@@ -180,6 +180,7 @@ export function useTripPlanner(
           },
           controller.signal,
         );
+        setClarification(undefined);
         setConversationId(created.conversation_id);
         window.history.replaceState(null, "", `/chat/${created.conversation_id}`);
         setConversations((current) => current.some((item) => item.id === created.conversation_id)

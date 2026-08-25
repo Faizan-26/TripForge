@@ -138,6 +138,18 @@ def test_clarification_scope_and_research_models() -> None:
         kind="single_select",
         options=[option],
     )
+    date_question = ClarificationQuestion(
+        id="start_date",
+        prompt="When should the trip start?",
+        kind="date",
+        description="Choose a preferred date.",
+    )
+    with pytest.raises(ValidationError):
+        ClarificationQuestion(
+            id="invalid_select",
+            prompt="Choose one",
+            kind="single_select",
+        )
     decision = ScopeDecision(
         trip_type="single_base",
         base_regions=["Islamabad"],
@@ -159,6 +171,7 @@ def test_clarification_scope_and_research_models() -> None:
     )
 
     assert question.options[0].value == "balanced"
+    assert date_question.kind == "date"
     assert scope.base_regions == ["Islamabad"]
     assert research.candidates[0].source.provider_id == "provider-activity"
     assert compatibility.distances_km["provider-activity"] == 2.5

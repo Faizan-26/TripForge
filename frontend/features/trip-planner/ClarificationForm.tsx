@@ -8,10 +8,30 @@ import type {
 } from "@/lib/trip-api/types";
 import styles from "@/app/chat/new/chat.module.css";
 
-function hasAnswer(question: ClarificationQuestion, answer: AnswerValue | undefined) {
-  if (!question.required) return true;
-  if (Array.isArray(answer)) return answer.length > 0;
-  return answer !== undefined && answer !== null && String(answer).trim().length > 0;
+function answerError(question: ClarificationQuestion, answer: AnswerValue | undefined) {
+  const empty = answer === undefined
+    || answer === null
+    || (Array.isArray(answer) ? answer.length === 0 : String(answer).trim().length === 0);
+  if (empty) return question.required ? "Choose an option or add your answer." : "";
+  if (question.kind === "number") {
+    const number = Number(answer);
+    if (!Number.isFinite(number)) return "Enter a valid number.";
+    if (question.min_value !== undefined && question.min_value !== null && number < question.min_value) {
+      return `Enter ${question.min_value} or more.`;
+    }
+    if (question.max_value !== undefined && question.max_value !== null && number > question.max_value) {
+      return `Enter ${question.max_value} or less.`;
+    }
+  }
+  if (typeof answer === "string") {
+    if (question.min_length && answer.length < question.min_length) {
+      return `Use at least ${question.min_length} characters.`;
+    }
+    if (question.max_length && answer.length > question.max_length) {
+      return `Use no more than ${question.max_length} characters.`;
+    }
+  }
+  return "";
 }
 
 export function ClarificationForm({
@@ -37,8 +57,9 @@ export function ClarificationForm({
   }
 
   function continueStep() {
-    if (!hasAnswer(question, answers[question.id])) {
-      setValidation("Choose an option or add your own answer.");
+    const error = answerError(question, answers[question.id]);
+    if (error) {
+      setValidation(error);
       return;
     }
     setValidation("");
@@ -48,22 +69,53 @@ export function ClarificationForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isLast) return continueStep();
-    if (!hasAnswer(question, answers[question.id])) {
-      setValidation("Choose an option or add your own answer.");
+    const error = answerError(question, answers[question.id]);
+    if (error) {
+      setValidation(error);
       return;
     }
     await onSubmit(answers);
   }
 
   const currentAnswer = answers[question.id];
-  const usesOptions = question.options.length > 0;
+  const usesOptions = (question.kind === "single_select" || multiple) && question.options.length > 0;
   const usingOther = Boolean(otherQuestions[question.id]);
+  const descriptionId = question.description ? `${question.id}-description` : undefined;
+
+  const customField = question.kind === "textarea"
+    ? <textarea
+        autoFocus
+        disabled={disabled}
+        rows={4}
+        minLength={question.min_length ?? undefined}
+        maxLength={question.max_length ?? 6000}
+        value={typeof currentAnswer === "string" ? currentAnswer : ""}
+        placeholder={question.placeholder ?? "Add any details that will improve the trip"}
+        aria-describedby={descriptionId}
+        onChange={(event) => update(event.target.value)}
+      />
+    : <input
+        autoFocus
+        disabled={disabled}
+        type={question.kind === "number" ? "number" : question.kind === "date" ? "date" : "text"}
+        inputMode={question.kind === "number" ? "decimal" : undefined}
+        min={question.kind === "number" ? question.min_value ?? undefined : undefined}
+        max={question.kind === "number" ? question.max_value ?? undefined : undefined}
+        step={question.kind === "number" ? question.step ?? "any" : undefined}
+        minLength={question.min_length ?? undefined}
+        maxLength={question.kind === "number" || question.kind === "date" ? undefined : question.max_length ?? 300}
+        value={typeof currentAnswer === "string" || typeof currentAnswer === "number" ? currentAnswer : ""}
+        placeholder={question.placeholder ?? (question.kind === "location" ? "City, region, or address" : "Type your answer")}
+        aria-describedby={descriptionId}
+        onChange={(event) => update(event.target.value)}
+      />;
 
   return <form className={styles.clarificationStepper} onSubmit={submit} aria-label="Trip clarification">
     <header>
       <div>
         <span>Question {step + 1} of {clarification.questions.length}</span>
         <strong>{question.prompt}</strong>
+        {question.description && <small id={descriptionId}>{question.description}</small>}
       </div>
       <div className={styles.stepDots} aria-hidden="true">
         {clarification.questions.map((item, index) => <i
@@ -73,7 +125,16 @@ export function ClarificationForm({
       </div>
     </header>
 
-    {usesOptions && !usingOther ? <div className={styles.stepOptions}>
+    {question.kind === "boolean" ? <div className={styles.stepOptions}>
+      {[{ value: true, label: "Yes" }, { value: false, label: "No" }].map((option) => <button
+        className={currentAnswer === option.value ? styles.stepOptionSelected : ""}
+        type="button"
+        disabled={disabled}
+        key={option.label}
+        aria-pressed={currentAnswer === option.value}
+        onClick={() => update(option.value)}
+      ><strong>{option.label}</strong></button>)}
+    </div> : usesOptions && !usingOther ? <div className={styles.stepOptions}>
       {question.options.map((option) => {
         const selected = multiple
           ? Array.isArray(currentAnswer) && currentAnswer.includes(option.value)
@@ -81,6 +142,7 @@ export function ClarificationForm({
         return <button
           className={selected ? styles.stepOptionSelected : ""}
           type="button"
+          disabled={disabled}
           key={option.value}
           aria-pressed={selected}
           onClick={() => {
@@ -95,27 +157,18 @@ export function ClarificationForm({
           {option.description && <small>{option.description}</small>}
         </button>;
       })}
-      <button
+      {question.allow_other !== false && <button
         className={styles.stepOther}
         type="button"
+        disabled={disabled}
         onClick={() => {
           setOtherQuestions((current) => ({ ...current, [question.id]: true }));
           update("");
         }}
-      >Other</button>
+      >Other</button>}
     </div> : <div className={styles.stepCustomAnswer}>
-      <input
-        autoFocus
-        type={question.kind === "number" ? "number" : "text"}
-        inputMode={question.kind === "number" ? "numeric" : undefined}
-        min={question.kind === "number" ? 1 : undefined}
-        max={question.kind === "number" ? 50 : undefined}
-        maxLength={question.kind === "number" ? undefined : 300}
-        value={typeof currentAnswer === "string" || typeof currentAnswer === "number" ? currentAnswer : ""}
-        placeholder={question.kind === "location" ? "City, region, or address" : "Type your answer"}
-        onChange={(event) => update(event.target.value)}
-      />
-      {usesOptions && <button type="button" onClick={() => {
+      {customField}
+      {usesOptions && <button type="button" disabled={disabled} onClick={() => {
         setOtherQuestions((current) => ({ ...current, [question.id]: false }));
         update("");
       }}>Show choices</button>}
@@ -124,7 +177,7 @@ export function ClarificationForm({
     <footer>
       <span className={styles.stepValidation} role="alert">{validation}</span>
       <div>
-        {step > 0 && <button type="button" onClick={() => setStep((current) => current - 1)}>Back</button>}
+        {step > 0 && <button type="button" disabled={disabled} onClick={() => setStep((current) => current - 1)}>Back</button>}
         <button className={styles.stepContinue} type="submit" disabled={disabled}>
           {disabled ? "Checking…" : isLast ? "Send answers" : "Next"}
         </button>

@@ -123,17 +123,46 @@ class TripRequirements(APIModel):
 
 
 class ClarificationOption(APIModel):
-    value: str
-    label: str
-    description: str | None = None
+    value: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=300)
 
 
 class ClarificationQuestion(APIModel):
-    id: str
-    prompt: str
-    kind: Literal["single_select", "multi_select", "text", "location", "number"]
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9_]*$")
+    prompt: str = Field(min_length=1, max_length=300)
+    kind: Literal[
+        "single_select",
+        "multi_select",
+        "text",
+        "textarea",
+        "location",
+        "number",
+        "date",
+        "boolean",
+    ]
     required: bool = True
-    options: list[ClarificationOption] = Field(default_factory=list)
+    options: list[ClarificationOption] = Field(default_factory=list, max_length=12)
+    description: str | None = Field(default=None, max_length=500)
+    placeholder: str | None = Field(default=None, max_length=160)
+    allow_other: bool = True
+    min_value: float | None = None
+    max_value: float | None = None
+    step: float | None = Field(default=None, gt=0)
+    min_length: int | None = Field(default=None, ge=0, le=6000)
+    max_length: int | None = Field(default=None, ge=1, le=6000)
+
+    @model_validator(mode="after")
+    def validate_question_shape(self) -> "ClarificationQuestion":
+        if self.kind in {"single_select", "multi_select"} and not self.options:
+            raise ValueError("select questions require at least one option")
+        if self.min_value is not None and self.max_value is not None:
+            if self.min_value > self.max_value:
+                raise ValueError("min_value cannot exceed max_value")
+        if self.min_length is not None and self.max_length is not None:
+            if self.min_length > self.max_length:
+                raise ValueError("min_length cannot exceed max_length")
+        return self
 
 
 class ScopeDecision(APIModel):

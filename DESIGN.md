@@ -60,6 +60,63 @@ TripForge feels like a quiet contemporary wayfinding hall crossed with an active
 - Route diagrams, round status markers, and operational evidence rather than decorative travel imagery.
 - Citron appears as a departure signal: rare, decisive, and reserved for forward motion.
 
+## Agentic Flow
+
+The planning experience follows a scoped, inspectable workflow. Agents make qualitative decisions, while tools and deterministic code handle external data, distance, timing, budget, and schema checks.
+
+```mermaid
+flowchart TD
+    U([Traveler describes a trip]) --> FE[TripForge interface]
+    FE --> API[FastAPI request + streamed events]
+    API --> S[Supervisor Agent<br/>understand intent and route work]
+
+    S --> Q{Enough trip detail?}
+    Q -- No --> C[Ask a focused question]
+    C --> U
+    Q -- Yes --> SC[Trip Scope Agent<br/>set regions, bases, dates, and limits]
+
+    SC --> ST[Stay Agent]
+    SC --> AC[Activities Agent]
+    ST --> STT[(Hotel search tools)]
+    AC --> ACT[(Places and activity tools)]
+
+    STT --> CP[Compatibility checks<br/>distance, travel time, dates]
+    ACT --> CP
+    CP --> R[Ranking Agent<br/>choose the best trip combination]
+    R --> I[Itinerary Agent<br/>build a realistic day-by-day plan]
+    I --> B[Budget engine<br/>calculate total cost]
+    B --> V{Validator / Critic}
+
+    V -- Valid --> A{Action needs approval?}
+    A -- No --> OUT[Stream grounded plan to traveler]
+    A -- Yes --> H[Request human approval]
+    H -- Approved --> X[(Execute approved action)]
+    H -- Declined --> OUT
+    X --> OUT
+
+    V -- Invalid --> RT[Structured retry instruction]
+    RT -->|scope issue| SC
+    RT -->|stay issue| ST
+    RT -->|activity issue| AC
+    RT -->|schedule issue| I
+
+    OUT --> FE
+
+    classDef user fill:#d9ee36,stroke:#10263c,color:#10263c,stroke-width:2px;
+    classDef agent fill:#102b43,stroke:#102b43,color:#fffdf8,stroke-width:1.5px;
+    classDef deterministic fill:#f5f0e6,stroke:#10263c,color:#10263c,stroke-width:1.5px;
+    classDef decision fill:#e7decd,stroke:#10263c,color:#10263c,stroke-width:1.5px;
+    classDef interface fill:#fffdf8,stroke:#647484,color:#10263c,stroke-width:1.25px;
+
+    class U,H user;
+    class S,SC,ST,AC,R,I,V agent;
+    class STT,ACT,CP,B,RT,X deterministic;
+    class Q,A decision;
+    class FE,API,C,OUT interface;
+```
+
+Stay and activity research fan out only after both receive the same geographic scope. Validation failures loop back to the smallest responsible step instead of restarting the entire workflow.
+
 ## Colors
 
 Warm paper carries the page; blue creates structured planning zones; citron marks the one action that moves a trip forward.

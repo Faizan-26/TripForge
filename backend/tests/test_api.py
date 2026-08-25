@@ -33,6 +33,7 @@ async def test_health_run_status_and_replayable_sse() -> None:
                 "google_maps_configured",
                     "supabase_configured",
                     "run_store",
+                    "agent_runtime",
                     "langsmith_tracing",
                 }
 
@@ -103,6 +104,7 @@ async def test_api_returns_mcq_clarification_payload() -> None:
 
             payload = snapshot.json()
             assert payload["status"] == "needs_clarification"
+            assert payload["result"]["ui_schema_version"] == "1"
             questions = {question["id"]: question for question in payload["result"]["questions"]}
             assert questions["travelers"]["kind"] == "single_select"
             assert questions["travelers"]["options"]

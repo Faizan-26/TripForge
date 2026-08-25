@@ -636,6 +636,14 @@
   font-size: .9rem;
 }
 
+.clarificationStepper header small {
+  max-width: 580px;
+  color: #647484;
+  font-size: .68rem;
+  font-weight: 450;
+  line-height: 1.45;
+}
+
 .stepDots {
   flex: 0 0 auto;
   display: flex;
@@ -706,7 +714,8 @@
   gap: 12px;
 }
 
-.stepCustomAnswer input {
+.stepCustomAnswer input,
+.stepCustomAnswer textarea {
   width: 100%;
   min-height: 44px;
   padding: 0 13px;
@@ -719,9 +728,23 @@
   font-size: .82rem;
 }
 
-.stepCustomAnswer input:focus {
+.stepCustomAnswer textarea {
+  min-height: 96px;
+  padding-block: 12px;
+  resize: vertical;
+}
+
+.stepCustomAnswer input:focus,
+.stepCustomAnswer textarea:focus {
   border-color: #294f6f;
   box-shadow: 0 0 0 2px #294f6f;
+}
+
+.clarificationStepper button:disabled,
+.stepCustomAnswer input:disabled,
+.stepCustomAnswer textarea:disabled {
+  cursor: wait;
+  opacity: .62;
 }
 
 .clarificationStepper footer {

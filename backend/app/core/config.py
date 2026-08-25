@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,8 +45,18 @@ class Settings(BaseSettings):
     max_research_results: int = Field(default=8, ge=1, le=20)
     max_activity_queries: int = Field(default=4, ge=1, le=8)
 
+    agent_runtime: Literal["langgraph", "deepseek"] = "langgraph"
+    harness_url: str = "http://127.0.0.1:8090"
+    harness_service_token: SecretStr | None = None
+    harness_timeout_seconds: float = Field(default=300, ge=10, le=1800)
+
     @model_validator(mode="after")
     def validate_supabase_configuration(self) -> "Settings":
+        if self.agent_runtime == "deepseek" and not (
+            self.harness_service_token
+            and self.harness_service_token.get_secret_value()
+        ):
+            raise ValueError("HARNESS_SERVICE_TOKEN is required when AGENT_RUNTIME=deepseek")
         if not self.supabase_auth_required:
             return self
         configured = (
