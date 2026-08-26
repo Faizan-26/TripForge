@@ -13,7 +13,7 @@ router = APIRouter(tags=["health"])
 @router.get("/health")
 async def health(
     settings: Annotated[Settings, Depends(get_app_settings)],
-    model: Annotated[PlanningModel, Depends(get_planning_model)],
+    model: Annotated[PlanningModel | None, Depends(get_planning_model)],
     maps: Annotated[GoogleMapsClient, Depends(get_maps_client)],
 ) -> dict[str, Any]:
     return {
@@ -21,8 +21,12 @@ async def health(
         "service": settings.app_name,
         "environment": settings.app_env,
         "capabilities": {
-            "planning_model": model.name,
-            "llm_configured": bool(settings.openai_api_key),
+            "planning_model": model.name if model else "deepseek_harness",
+            "llm_configured": (
+                bool(settings.harness_service_token)
+                if settings.agent_runtime == "deepseek"
+                else bool(settings.openai_api_key)
+            ),
             "google_maps_configured": maps.configured,
             "supabase_configured": bool(
                 settings.supabase_url

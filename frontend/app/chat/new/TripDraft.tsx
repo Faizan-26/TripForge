@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState, useTransition } from "react";
+import { FormEvent, Fragment, KeyboardEvent, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ClarificationForm } from "@/features/trip-planner/ClarificationForm";
@@ -286,15 +286,18 @@ export function ChatWorkspace({
             <button type="button" onClick={() => setIdea("A culture-filled city break without rushing")}>City and culture</button>
           </div>
         </div> : <div className={styles.messages} aria-live="polite">
-          {messages.map((message) => <article className={message.role === "traveler" ? styles.travelerMessage : styles.assistantMessage} key={message.id}>
-            {message.role === "assistant" && <span className={styles.assistantMark}>TF</span>}
-            <div>
-              <span>{message.role === "traveler" ? "You" : "TripForge"}</span>
-              <p>{message.content}</p>
-              {message.artifact && "itinerary" in message.artifact && <TripPlanView plan={message.artifact} />}
-              {message.artifact && "properties" in message.artifact && <HotelSearchResults result={message.artifact} disabled={busy} onSelect={selectHotelAndPlan} />}
-            </div>
-          </article>)}
+          {messages.map((message) => <Fragment key={message.id}>
+            {message.role === "assistant" && message.activity && <PlanningProgress events={message.activity} status={message.activityStatus} />}
+            <article className={message.role === "traveler" ? styles.travelerMessage : styles.assistantMessage}>
+              {message.role === "assistant" && <span className={styles.assistantMark}>TF</span>}
+              <div>
+                <span>{message.role === "traveler" ? "You" : "TripForge"}</span>
+                <p>{message.content}</p>
+                {message.artifact && "itinerary" in message.artifact && <TripPlanView plan={message.artifact} />}
+                {message.artifact && "properties" in message.artifact && <HotelSearchResults result={message.artifact} disabled={busy} onSelect={selectHotelAndPlan} />}
+              </div>
+            </article>
+          </Fragment>)}
           <PlanningProgress events={events} status={status} />
           {hotelResult && !messages.some((message) => message.artifact === hotelResult) && <HotelSearchResults result={hotelResult} disabled={busy} onSelect={selectHotelAndPlan} />}
           {plan && !messages.some((message) => message.artifact === plan) && <TripPlanView plan={plan} />}

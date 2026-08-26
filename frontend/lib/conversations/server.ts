@@ -48,12 +48,18 @@ export async function getConversationDetail(
     .select("id,run_id,kind,version,status,is_current,title,payload,created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
+  const eventsQuery = supabase
+    .from("agent_run_events")
+    .select("payload")
+    .eq("conversation_id", conversationId)
+    .order("id", { ascending: true });
 
-  const [conversation, messages, runs, artifacts] = await Promise.all([
+  const [conversation, messages, runs, artifacts, events] = await Promise.all([
     conversationQuery,
     messagesQuery,
     runsQuery,
     artifactsQuery,
+    eventsQuery,
   ]);
   const error = conversation.error ?? messages.error ?? runs.error ?? artifacts.error;
   if (error) throw new Error("Could not load conversation", { cause: error });
@@ -64,5 +70,11 @@ export async function getConversationDetail(
     messages: (messages.data ?? []) as ConversationMessage[],
     runs: (runs.data ?? []) as ConversationRun[],
     artifacts: (artifacts.data ?? []) as ConversationArtifact[],
+    events: (events.data ?? []).flatMap((row) => {
+      const payload = row.payload;
+      return payload && typeof payload === "object"
+        ? [payload as ConversationDetail["events"][number]]
+        : [];
+    }),
   };
 }

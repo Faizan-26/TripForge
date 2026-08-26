@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { writePluginPatch } from "./plugin-patch.mjs";
+import { renderPrompt } from "./prompts.mjs";
 
 export class FakeRuntime {
   async *execute() {
-    yield progress("supervisor", "Understanding your message", { runtime: "fake" });
+    yield progress("supervisor", "Understanding your message", { runtime: "fake" }, "agent.started");
+    yield progress("supervisor", "Preparing your response", { runtime: "fake" }, "answer.preparing");
     yield completed({
       general_result: {
         intent: "GENERAL",
@@ -30,12 +32,18 @@ export class DeepSeekCliRuntime {
     yield progress("supervisor", "DeepSeek Harness is starting", {
       runtime: "deepseek",
       session_id: request.conversation_id,
-    });
+    }, "agent.started");
 
     const workspace = path.join(this.config.workspaceRoot, request.run_id);
     await fs.mkdir(workspace, { recursive: true });
-    const task = buildTask(request);
-    const { command, args } = commandFor(this.config, this.platform, task);
+    const pluginPatch = path.join(workspace, "tripforge.plugins.patch.yml");
+    await writePluginPatch(pluginPatch, this.config);
+    const task = buildTask(request, this.config.headlessTaskPrompt);
+    const { command, args } = commandFor(
+      { ...this.config, pluginPatch },
+      this.platform,
+      task,
+    );
     const queuedProgress = [];
     let wake;
     let finished = false;
@@ -53,10 +61,6 @@ export class DeepSeekCliRuntime {
         ...process.env,
         DSH_HOME: this.config.dshHome,
         DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE ?? "read-only",
-        DSH_TRIPFORGE_GOOGLE_PLACES_PLUGIN: pathToFileURL(
-          this.config.googlePlacesPlugin,
-        ).href,
-        DSH_TRIPFORGE_PROGRESS_PLUGIN: pathToFileURL(this.config.progressPlugin).href,
       },
       timeoutMs: this.config.timeoutMs,
       maxOutputBytes: this.config.maxOutputBytes,
@@ -86,6 +90,9 @@ export class DeepSeekCliRuntime {
     if (failure) throw failure;
 
     process.stdout.write(`[harness] run ${request.run_id} completed\n`);
+    yield progress("supervisor", "Response is ready", {
+      runtime: "deepseek",
+    }, "agent.completed");
     yield completed(parseHarnessResult(output, request.conversation_id));
   }
 }
@@ -95,11 +102,13 @@ export function buildRuntime(config) {
 }
 
 export function commandFor(config, platform, prompt) {
-  const launcherArgs = ["--profile", "headless", "--patch", config.tripforgePatch, prompt];
+  const launcherArgs = ["--profile", "headless", "--patch", config.tripforgePatch];
+  if (config.pluginPatch) launcherArgs.push("--patch", config.pluginPatch);
+  launcherArgs.push(prompt);
   if (config.dshCommand) {
     return {
       command: config.dshCommand,
-      args: launcherArgs,
+      args: [...(config.dshPrefixArgs ?? []), ...launcherArgs],
     };
   }
 
@@ -113,33 +122,11 @@ export function commandFor(config, platform, prompt) {
   };
 }
 
-export function buildTask(request) {
-  return `You are the TripForge supervisor running inside DeepSeek Harness.
-
-Your current responsibility is intake and routing. Do not invent hotels, places,
-prices, availability, routes, or weather. Delegate analysis when useful, but return
-one final machine-readable JSON object and no prose outside it.
-
-User request:
-${request.message}
-
-Structured request context:
-${JSON.stringify(request.payload ?? {})}
-
-Return exactly one of these shapes:
-{"outcome":"general","message":"...","conversation_title":"..."}
-{"outcome":"clarification","ui_schema_version":"1","draft":{},"questions":[{"id":"snake_case_id","kind":"single_select|multi_select|text|textarea|location|number|date|boolean","prompt":"...","description":"...","placeholder":"...","required":true,"allow_other":false,"min_value":null,"max_value":null,"step":null,"min_length":null,"max_length":null,"options":[{"value":"...","label":"...","description":"..."}]}],"conversation_title":"..."}
-
-Ask only questions required to proceed. For a full trip plan, required basics are
-destination, traveler count, and either dates or duration. Research and itinerary
-generation are not enabled in this migration slice, so if those basics are present,
-state that tool-backed planning is still being connected instead of fabricating a plan.
-When search_google_places is available, use it for current place, hotel, restaurant,
-and attraction discovery questions. Base claims only on its results and retain provider
-IDs and Google Maps links when they are useful to the traveler.
-Use select fields only when you supply options. Use date for a single ISO date, boolean
-for yes/no, and textarea only when a longer answer is genuinely useful. Never return
-HTML, JavaScript, CSS, URLs for UI controls, or an unlisted question kind.`;
+export function buildTask(request, template) {
+  return renderPrompt(template, {
+    USER_MESSAGE: request.message,
+    REQUEST_CONTEXT: JSON.stringify(request.payload ?? {}),
+  });
 }
 
 export function parseHarnessResult(output, sessionId) {
@@ -279,9 +266,17 @@ export function parseProgressLine(line) {
   try {
     const value = JSON.parse(line.slice(prefix.length));
     if (!isRecord(value) || typeof value.message !== "string") return undefined;
-    const supported = new Set(["tool.started", "tool.completed", "tool.failed"]);
+    const supported = new Set([
+      "agent.started",
+      "agent.progress",
+      "agent.completed",
+      "answer.preparing",
+      "tool.started",
+      "tool.completed",
+      "tool.failed",
+    ]);
     return {
-      type: supported.has(value.type) ? value.type : "tool.progress",
+      type: supported.has(value.type) ? value.type : "agent.progress",
       agent: typeof value.agent === "string" ? value.agent.slice(0, 100) : "supervisor",
       message: value.message.slice(0, 300),
       data: isRecord(value.data) ? value.data : {},
@@ -380,7 +375,13 @@ function runProcess({
 }
 
 function progress(agent, message, data = {}, type = "agent.progress") {
-  return { kind: "progress", type, agent, message, data };
+  return {
+    kind: "progress",
+    type,
+    agent,
+    message,
+    data: { activity_schema_version: "1", ...data },
+  };
 }
 
 function completed(state) {

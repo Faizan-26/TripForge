@@ -1,0 +1,22 @@
+# Web Inspector-only dependencies. The production headless profile never loads
+# this patch and keeps these browser-facing services disabled.
+- id: commands
+  disabled: false
+- id: user-questions
+  disabled: false
+- id: attachment-local
+  disabled: false
+- id: session-query-sqlite
+  disabled: false
+  config:
+    path: ':memory:'
+    openAt: never
+
+# The shipped Web `standard` preset is a coding-agent composition and expects
+# registries intentionally removed by TripForge. Without a preset roster, DSH
+# creates Web sessions from the shared TripForge host composition, which owns
+# our travel tools. Hide the selector because there is no alternate preset.
+- id: agent-presets
+  disabled: true
+- id: ui-agent-preset
+  disabled: true

@@ -125,9 +125,16 @@ The checked-in scaffold is intentionally smaller than the target layout:
 
 - `src/server.mjs` provides health and authenticated NDJSON execution endpoints.
 - `src/runtime.mjs` provides deterministic fake mode and the native CLI adapter.
+- `src/inspect.mjs` boots the local DeepSeek Web/Trajectory inspector with the
+  production TripForge composition plus a Web-only service override.
+- `src/plugin-patch.mjs` generates portable literal file URLs for local plugins;
+  plugin paths are never evaluated as JavaScript configuration objects.
 - `src/config.mjs` validates runtime configuration.
+- `prompts/supervisor.md` owns the shared agent persona used by Headless and Inspector.
+- `prompts/headless-task.md` owns the backend execution/output contract prompt.
 - `plugins/progress` emits sanitized tool lifecycle events into the existing NDJSON/SSE path.
 - `plugins/google-places` registers the typed, read-only `search_google_places` tool.
+- `plugins/google-routes` registers the typed, read-only `compute_google_route` tool.
 - `test/` verifies Windows startup, contracts, progress framing, provider normalization,
   cancellation boundaries, and safe provider failures without using live credentials.
 
@@ -136,7 +143,7 @@ SDK's persistent PTY composition still requires POSIX, so TripForge uses the Nod
 headless profile on Windows and keeps the Python SDK out of this service. Production
 should still use a pinned package and a least-privilege preset with narrow travel tools.
 
-## Migration checkpoint — 2026-08-25
+## Migration checkpoint — 2026-08-26
 
 This is the continuation point for `feature/deepseek-harness`.
 
@@ -161,25 +168,43 @@ This is the continuation point for `feature/deepseek-harness`.
 - [x] Preserved the FastAPI/SSE pause-and-resume flow using `parent_run_id`; Harness
   credentials and provider keys never reach the browser.
 - [x] Added the `tripforge-progress` plugin and runtime framing for sanitized
-  `tool.started`, `tool.completed`, and `tool.failed` events.
+  agent, answer-preparation, and `tool.started`, `tool.completed`, and `tool.failed`
+  lifecycle events. Private reasoning and raw model output are never published.
+- [x] Added the versioned public activity contract at the FastAPI boundary with an
+  event allowlist, bounded fields, secret redaction, and fail-closed handling for
+  unknown Harness event types.
+- [x] Replaced the frontend's single transient thinking row with an expandable live
+  activity timeline. Tool calls are paired with their outcomes and durations, the
+  timeline is persisted with run events, and completed conversations rehydrate it.
 - [x] Added the typed, read-only `search_google_places` plugin with bounded requests,
   fixed-host enforcement, cancellation, normalized provider IDs, and native Harness
   inspector presentation metadata.
+- [x] Added the typed, read-only `compute_google_route` plugin with grounded-location
+  requirements, optimized round trips, normalized legs/duration/polyline, fixed-host
+  enforcement, cancellation, and inspector metadata. It remains installed but is
+  disabled by default behind `TRIPFORGE_GOOGLE_ROUTES_ENABLED`.
+- [x] Extracted agent instructions into the versioned `prompts/` directory with
+  bounded file loading and explicit template substitution.
+- [x] Added the local Inspector launcher using DeepSeek Harness Web and its native
+  Trajectory viewer with the same patch, tools, model, and read-only permissions as
+  production.
+- [x] Isolated Inspector runtime/session files from the service and bound the Web profile
+  to `127.0.0.1` only.
+- [x] Replaced Windows `.cmd` child launching with the pinned DSH JavaScript entrypoint
+  through Node, avoiding `spawn EINVAL` without enabling a command shell.
+- [x] Added a generated local-plugin patch with literal module URLs and a separate
+  Inspector-only patch for the browser services excluded from production Headless.
 - [x] Added plugin activation reporting to Harness `/health`.
 - [x] Added mocked Google provider, plugin-registration, progress-contract, HTTP, and
-  Windows launcher tests. The Harness suite last passed with 15 tests; the Next.js
+  Windows launcher tests. The Harness suite currently passes 25 tests; the Next.js
   production build and ESLint also passed during this checkpoint.
-- [x] Verified both custom plugins load in the pinned real Headless Cordis composition
-  using `dsh --profile headless --patch ... --help`, without making a model call.
+- [x] Verified the custom composition loads in both pinned Headless and Web profiles
+  without making a model call.
 
 ### Started but incomplete
 
 - [ ] Run a live `search_google_places` prompt with a restricted Google key and inspect
   the resulting model/tool behavior. Unit tests currently use mocked responses only.
-- [ ] Add a `tripforge-inspector` Web profile/launcher using the same tools and permission
-  policy as production so Trajectory can show agents, calls, inputs/outputs, and timing.
-- [ ] Expand progress streaming beyond tool lifecycle to safe agent/subagent and model
-  request lifecycle events; never expose hidden reasoning.
 - [ ] Implement durable Harness session continuation. Clarification currently resumes at
   the TripForge/FastAPI contract level, but the CLI adapter does not yet invoke native
   `dsh --resume` session continuation.
@@ -188,8 +213,6 @@ This is the continuation point for `feature/deepseek-harness`.
 
 ### Not started
 
-- [ ] `google-routes` plugin for route matrices, travel durations, distances, and route
-  geometry.
 - [ ] `tripvlog-properties` plugin for hotel offers, availability, rooms, reviews, and
   media.
 - [ ] Optional weather, currency, timezone, and official travel-advisory plugins.
@@ -208,8 +231,8 @@ This is the continuation point for `feature/deepseek-harness`.
 ### Recommended next session
 
 1. Recreate the backend virtual environment and run all Python tests.
-2. Add the inspector launcher and perform one live, read-only Google Places prompt.
-3. Implement `google-routes` with the same typed-tool and mocked-provider pattern.
+2. Perform one live, read-only Google Places prompt in Inspector and review Trajectory.
+3. Implement `tripvlog-properties` with the same typed-tool and mocked-provider pattern.
 4. Add versioned hotel/plan result contracts before introducing specialized agents.
 
 Before committing, keep `harness/.env`, `backend/.env`, `.dsh-runtime/`, and
@@ -235,10 +258,10 @@ Implement them in this order:
 
 | Priority | Plugin | Responsibility | Decision |
 | --- | --- | --- | --- |
-| 1 | `tripforge-contracts` | Validate question, hotel, itinerary, source, and progress event schemas | Required before any provider tool |
-| 2 | `tripforge-progress` | Publish safe agent/tool lifecycle events to the NDJSON stream | Required for the existing live frontend |
-| 3 | `google-places` | Text search, place details, photos, ratings, and stable place IDs | Read-only; port the existing backend client first |
-| 4 | `google-routes` | Route matrix, durations, distances, and daily route geometry | Read-only; keep compatibility math deterministic |
+| 1 | `tripforge-contracts` | Validate question, hotel, itinerary, source, and progress event schemas | Question/progress boundary implemented; hotel/plan contracts remain |
+| 2 | `tripforge-progress` | Publish safe agent/tool lifecycle events to the NDJSON stream | Agent, answer-preparation, and tool lifecycle implemented; hidden reasoning is intentionally excluded |
+| 3 | `google-places` | Text search, place details, ratings, and stable place IDs | Implemented read-only; photo retrieval remains |
+| 4 | `google-routes` | Route order, durations, distances, legs, and geometry | Implemented read-only; keep compatibility math deterministic |
 | 5 | `tripvlog-properties` | Hotel identity enrichment, offers, availability, rooms, reviews, and media | Read-only until approval infrastructure exists |
 | 6 | `tripforge-decisions` | Scope, compatibility ranking, itinerary assignment, budget calculation, and validation | Model ranks; deterministic code enforces constraints |
 | 7 | `tripforge-approvals` | Draft/confirm boundary for booking or other consequential writes | Add only when write actions enter scope |
@@ -256,18 +279,44 @@ $env:HARNESS_SERVICE_TOKEN="local-development-token"
 npm.cmd start
 ```
 
-### Enable the first real provider plugin
+### Configure the OpenCode Zen model
 
-Set `GOOGLE_MAPS_API_KEY` in `harness/.env` to enable `search_google_places`. The
-key must be authorized for Google Places API (New). During migration the backend
+TripForge registers OpenCode Zen through DSH's generic OpenAI-compatible adapter;
+it does not send Zen credentials through the `deepseek-official` provider route.
+The current environment variable names are retained for compatibility:
+
+```dotenv
+DEEPSEEK_API_KEY=replace-with-a-new-zen-key
+DEEPSEEK_BASE_URL=https://opencode.ai/zen/v1
+DSH_MODEL=nemotron-3.5-lightning-free
+DSH_CONTEXT_WINDOW_TOKENS=65536
+DSH_MAX_OUTPUT_TOKENS=4096
+```
+
+The context bound keeps long sessions from growing without limit, while the output cap
+is large enough for a multi-day itinerary but far below the adapter's former 32K default.
+The supervisor asks for all relevant missing trip or hotel details in one clarification
+pass and avoids provider searches until those requirements are complete.
+
+Use a model ID returned by `GET /zen/v1/models`. Provider documentation can briefly
+lead the live catalog: on 2026-08-26 Zen rejected `x-preview-f-free` as unsupported,
+while `nemotron-3.5-lightning-free` is the current TripForge model.
+
+### Enable the Google provider plugins
+
+Set `GOOGLE_MAPS_API_KEY` in `harness/.env` to enable `search_google_places`.
+`compute_google_route` remains disabled unless you also set
+`TRIPFORGE_GOOGLE_ROUTES_ENABLED=true`; leave it `false` for the current phase.
+When enabled, the key must be authorized for Google Places API (New) and Google Routes
+API. During migration the backend
 may still have its own copy; after the legacy agent path is removed, keep the
 provider credential only with the Harness service.
 
-The plugin sends the key in the Google header, never a URL, and accepts only the
-fixed HTTPS `places.googleapis.com` endpoint. It caps calls at 10 results, bounds
-provider strings, rejects invalid coordinate/radius biases, forwards cancellation,
-and strips unsupported fields before the model sees results. Calls are read-only
-and concurrency-safe only after their arguments pass Harness schema validation.
+The plugins send the key in Google headers, never URLs, and accept only the fixed HTTPS
+`places.googleapis.com` and `routes.googleapis.com` endpoints. They bound provider
+data and request sizes, reject ungrounded or invalid locations, forward cancellation,
+and strip unsupported fields before the model sees results. Calls are read-only and
+concurrency-safe only after their arguments pass Harness schema validation.
 
 Check activation without exposing the key:
 
@@ -275,8 +324,32 @@ Check activation without exposing the key:
 Invoke-RestMethod http://127.0.0.1:8090/health
 ```
 
-The response reports `plugins.google_places: true`. Tool start/completion/failure
-events then stream through FastAPI to the existing frontend planning indicator.
+With the current configuration, the response reports `plugins.google_places: true` and
+`plugins.google_routes: false`.
+Tool start/completion/failure events then stream through FastAPI to the existing
+frontend planning indicator.
+
+### Open the local Harness Inspector
+
+Start the native DeepSeek Harness Web UI from the Harness directory:
+
+```powershell
+npm.cmd run inspect
+```
+
+It opens `http://127.0.0.1:8091` by default. Use `npm.cmd run inspect:no-open` when
+you want the URL printed without opening a browser. The launcher inherits provider
+configuration from `harness/.env` but starts DSH inside `.inspector-workspace`, which
+avoids the DSH restriction on launcher-owned settings such as `DEEPSEEK_BASE_URL` in
+the current working directory's `.env`. It also applies
+`config/tripforge.inspector.patch.yml` to restore only the browser-facing services
+required by Web; the production Headless runtime does not load that override.
+
+Open a conversation, send a travel prompt, then select the **Trajectory** view to inspect
+turns, steps, tool/subtool calls, sanitized inputs and outputs, duration, timing, and
+token usage. This is observable execution telemetry, not private chain-of-thought.
+Inspector sessions live under `.dsh-inspector/`; both Inspector directories are ignored
+by Git and are separate from the production Headless session directory.
 
 ## Migration plan
 

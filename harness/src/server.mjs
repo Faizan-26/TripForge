@@ -16,7 +16,8 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
           platform: process.platform,
           plugins: {
             progress: config.mode === "deepseek",
-            google_places: config.mode === "deepseek" && Boolean(config.googlePlacesEnabled),
+            google_places: config.mode === "deepseek" && Boolean(config.googleMapsEnabled),
+            google_routes: config.mode === "deepseek" && Boolean(config.googleRoutesEnabled),
           },
         });
       }

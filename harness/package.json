@@ -7,6 +7,8 @@
     "node": ">=22.19"
   },
   "scripts": {
+    "inspect": "node --env-file=.env src/inspect.mjs",
+    "inspect:no-open": "node --env-file=.env src/inspect.mjs --no-open",
     "start": "node --env-file=.env src/server.mjs",
     "test": "node --test"
   },

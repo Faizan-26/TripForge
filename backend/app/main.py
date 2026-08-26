@@ -10,13 +10,10 @@ from app.api.health import router as health_router
 from app.api.places import router as places_router
 from app.api.runs import router as runs_router
 from app.core.config import Settings, get_settings
-from app.graph.builder import build_trip_graph
 from app.harness.runs import InMemoryRunManager
 from app.llm.base import PlanningModel
-from app.llm.factory import build_planning_model
 from app.runtime.base import AgentRuntime
 from app.runtime.harness_http import HarnessHttpRuntime
-from app.runtime.langgraph import LangGraphRuntime
 from app.supabase import SupabaseGateway
 from app.services.langsmith import configure_langsmith
 from app.tools.google_maps import GoogleMapsClient
@@ -35,7 +32,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        model = planning_model or build_planning_model(app_settings)
+        model = planning_model
         maps = maps_client or GoogleMapsClient(app_settings.google_maps_api_key)
         selected_runtime = runtime
         if selected_runtime is None and app_settings.agent_runtime == "deepseek":
@@ -45,6 +42,11 @@ def create_app(
                 timeout_seconds=app_settings.harness_timeout_seconds,
             )
         if selected_runtime is None:
+            from app.graph.builder import build_trip_graph
+            from app.llm.factory import build_planning_model
+            from app.runtime.langgraph import LangGraphRuntime
+
+            model = model or build_planning_model(app_settings)
             compiled_graph = graph or build_trip_graph(
                 settings=app_settings,
                 model=model,

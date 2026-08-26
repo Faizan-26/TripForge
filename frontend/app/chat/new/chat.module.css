@@ -899,6 +899,165 @@
 .thinkingMessage p b:nth-child(2) { animation-delay: .15s; }
 .thinkingMessage p b:nth-child(3) { animation-delay: .3s; }
 
+.activityMessage {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  animation: messageIn .3s both cubic-bezier(.22, 1, .36, 1);
+}
+
+.activityCard {
+  width: min(650px, calc(100% - 46px));
+  overflow: hidden;
+  border: 1px solid #d7ddd5;
+  border-radius: 4px 16px 16px 16px;
+  background: #f5f0e6;
+}
+
+.activityToggle {
+  width: 100%;
+  min-height: 58px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  background: transparent;
+  color: #10263c;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activityToggle:hover {
+  background: #eeeadf;
+}
+
+.activityToggle:focus-visible {
+  outline: 3px solid #294f6f;
+  outline-offset: -3px;
+}
+
+.activityToggle > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.activityToggle strong {
+  font-size: .78rem;
+  font-weight: 720;
+}
+
+.activityToggle small {
+  overflow: hidden;
+  color: #65766f;
+  font-size: .66rem;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activityToggle > svg {
+  flex: 0 0 18px;
+  width: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+  transition: transform .2s ease;
+}
+
+.activityToggle[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+
+.activityTimeline {
+  margin: 0;
+  padding: 2px 15px 14px 16px;
+  list-style: none;
+}
+
+.activityTimeline li {
+  position: relative;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.activityTimeline li:not(:last-child)::after {
+  position: absolute;
+  top: 23px;
+  bottom: -1px;
+  left: 10px;
+  width: 1px;
+  background: #ccd5cd;
+  content: "";
+}
+
+.activityTimeline li > span:last-child {
+  min-width: 0;
+  padding: 4px 0 11px;
+  display: grid;
+  gap: 2px;
+}
+
+.activityTimeline strong {
+  color: #20394f;
+  font-size: .72rem;
+  font-weight: 680;
+}
+
+.activityTimeline small {
+  overflow: hidden;
+  color: #6b7b73;
+  font-size: .65rem;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activityGlyph {
+  position: relative;
+  z-index: 1;
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #c4cec6;
+  border-radius: 50%;
+  background: #fffefa;
+  color: #294f6f;
+}
+
+.activityGlyph svg {
+  width: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.activity_active .activityGlyph {
+  border-color: #9eaf38;
+  box-shadow: inset 0 0 0 5px #d9ee36;
+  animation: activityPulse 1.5s ease-in-out infinite;
+}
+
+.activity_failed .activityGlyph {
+  border-color: #c9968e;
+  color: #8e3e31;
+}
+
+.activity_paused .activityGlyph {
+  border-color: #c3aa67;
+  color: #80621d;
+}
+
 .plan,
 .runError {
   width: 100%;
@@ -2176,11 +2335,16 @@
   30% { transform: translateY(-3px); opacity: 1; }
 }
 
+@keyframes activityPulse {
+  50% { box-shadow: inset 0 0 0 5px #d9ee36, 0 0 0 4px rgba(217, 238, 54, .24); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .welcome,
   .travelerMessage,
   .assistantMessage,
   .thinkingMessage,
+  .activityMessage,
   .clarificationStepper {
     animation: none;
   }
@@ -2193,6 +2357,14 @@
   .suggestions button,
   .composer button {
     transition: none;
+  }
+
+  .activityToggle > svg {
+    transition: none;
+  }
+
+  .activity_active .activityGlyph {
+    animation: none;
   }
 
   .accountMenu {

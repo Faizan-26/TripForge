@@ -22,7 +22,7 @@ async def get_app_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
-async def get_planning_model(request: Request) -> PlanningModel:
+async def get_planning_model(request: Request) -> PlanningModel | None:
     return request.app.state.planning_model
 
 

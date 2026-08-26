@@ -1,11 +1,51 @@
 const PREFIX = "TRIPFORGE_PROGRESS\t";
 const REDACTED_KEY = /authorization|api[_-]?key|password|secret|token/i;
+const ACTIVITY_SCHEMA_VERSION = "1";
 
 export const name = "tripforge-progress";
-export const inject = ["tools"];
+export const inject = ["tools", "sessions"];
 
 export function apply(ctx) {
   const startedAt = new WeakMap();
+  ctx.on("session/event", (_session, event) => {
+    if (event.type === "turn/start") {
+      publish({
+        type: "agent.progress",
+        agent: "supervisor",
+        message: "Reviewing your trip request",
+        data: { turn: event.data.turn },
+      });
+      return;
+    }
+    if (event.type === "step/start") {
+      publish({
+        type: "agent.progress",
+        agent: "supervisor",
+        message: event.data.step === 1
+          ? "Working out the best next step"
+          : "Refining the trip response",
+        data: { turn: event.data.turn, step: event.data.step },
+      });
+      return;
+    }
+    if (event.type === "assistant/message") {
+      const content = Array.isArray(event.data.message?.content)
+        ? event.data.message.content
+        : [];
+      const hasFinalText = content.some((block) => (
+        block?.type === "text" && typeof block.text === "string" && block.text.trim()
+      ));
+      const hasToolCall = content.some((block) => block?.type === "tool-call");
+      if (!hasFinalText || hasToolCall) return;
+      publish({
+        type: "answer.preparing",
+        agent: "supervisor",
+        message: "Preparing your response",
+        data: { turn: event.data.turn, step: event.data.step },
+      });
+    }
+  });
+
   ctx.on("tools/pre-execute", (exec, next) => {
     startedAt.set(exec, performance.now());
     publish({
@@ -45,7 +85,13 @@ export function formatProgressLine(event) {
 }
 
 function publish(event) {
-  process.stderr.write(formatProgressLine(event));
+  process.stderr.write(formatProgressLine({
+    ...event,
+    data: {
+      activity_schema_version: ACTIVITY_SCHEMA_VERSION,
+      ...(event.data ?? {}),
+    },
+  }));
 }
 
 function agentId(exec) {
@@ -54,9 +100,11 @@ function agentId(exec) {
 }
 
 function toolMessage(tool, phase) {
-  const label = tool === "search_google_places"
-    ? "Google Places search"
-    : tool.replaceAll("_", " ");
+  const labels = {
+    search_google_places: "Google Places search",
+    compute_google_route: "Google route calculation",
+  };
+  const label = labels[tool] ?? tool.replaceAll("_", " ");
   return `${label} ${phase}`;
 }
 

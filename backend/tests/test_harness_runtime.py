@@ -22,7 +22,50 @@ def test_harness_progress_update_maps_to_runtime_contract() -> None:
 
     assert isinstance(update, RuntimeProgress)
     assert update.agent == "supervisor"
-    assert update.data == {"source": "deepseek"}
+    assert update.data == {"activity_schema_version": "1"}
+
+
+def test_harness_progress_contract_allows_safe_tool_context_and_redacts_secrets() -> None:
+    update = _parse_update(
+        json.dumps(
+            {
+                "kind": "progress",
+                "type": "tool.started",
+                "agent": "supervisor",
+                "message": "Google Places search running",
+                "data": {
+                    "tool": "search_google_places",
+                    "call_id": "call-1",
+                    "arguments": {"query": "quiet hotels in Kyoto", "api_key": "nope"},
+                    "reasoning": "must never reach the browser",
+                },
+            }
+        )
+    )
+
+    assert isinstance(update, RuntimeProgress)
+    assert update.data["arguments"] == {
+        "query": "quiet hotels in Kyoto",
+        "api_key": "[redacted]",
+    }
+    assert "reasoning" not in update.data
+
+
+def test_harness_unknown_progress_type_falls_back_without_forwarding_private_data() -> None:
+    update = _parse_update(
+        json.dumps(
+            {
+                "kind": "progress",
+                "type": "reasoning.delta",
+                "message": "private reasoning",
+                "data": {"content": "hidden"},
+            }
+        )
+    )
+
+    assert isinstance(update, RuntimeProgress)
+    assert update.type == "agent.progress"
+    assert update.data == {"activity_schema_version": "1"}
 
 
 def test_harness_completed_update_maps_to_runtime_contract() -> None:

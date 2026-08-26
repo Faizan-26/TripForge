@@ -8,6 +8,7 @@ import {
   parseProgressLine,
 } from "../src/runtime.mjs";
 import { formatProgressLine } from "../plugins/progress/index.mjs";
+import { renderPluginPatch } from "../src/plugin-patch.mjs";
 import { createServer, validateExecuteRequest } from "../src/server.mjs";
 
 test("Windows uses the cmd npx shim without a shell", () => {
@@ -28,6 +29,36 @@ test("an explicitly installed CLI takes precedence over npx", () => {
   );
   assert.equal(result.command, "C:\\tools\\dsh.cmd");
   assert.deepEqual(result.args.slice(0, 4), ["--profile", "headless", "--patch", "patch.yml"]);
+});
+
+test("a pinned JavaScript CLI entrypoint runs through Node without a Windows shell", () => {
+  const result = commandFor(
+    {
+      dshCommand: process.execPath,
+      dshPrefixArgs: ["C:\\tripforge\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js"],
+      tripforgePatch: "patch.yml",
+    },
+    "win32",
+    "Plan a trip",
+  );
+  assert.equal(result.command, process.execPath);
+  assert.equal(result.args[0], "C:\\tripforge\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js");
+  assert.deepEqual(result.args.slice(1, 5), ["--profile", "headless", "--patch", "patch.yml"]);
+});
+
+test("custom plugin patch uses literal module URLs instead of evaluated objects", () => {
+  const patch = renderPluginPatch({
+    progressPlugin: "C:\\tripforge\\plugins\\progress\\index.mjs",
+    googlePlacesPlugin: "C:\\tripforge\\plugins\\google-places\\index.mjs",
+    googleRoutesPlugin: "C:\\tripforge\\plugins\\google-routes\\index.mjs",
+    googleMapsEnabled: true,
+    googleRoutesEnabled: false,
+    supervisorPrompt: "TripForge supervisor {{model}}",
+  });
+  assert.match(patch, /name: "file:\/\/\/C:\/tripforge\/plugins\/progress\/index\.mjs"/u);
+  assert.doesNotMatch(patch, /!!js|DSH_TRIPFORGE/u);
+  assert.match(patch, /disabled: false/u);
+  assert.match(patch, /tripforge-google-routes[\s\S]*disabled: true/u);
 });
 
 test("fake runtime emits progress followed by completion", async () => {
@@ -126,7 +157,7 @@ test("HTTP service authenticates and streams NDJSON", async (context) => {
     status: "ok",
     mode: "fake",
     platform: process.platform,
-    plugins: { progress: false, google_places: false },
+    plugins: { progress: false, google_places: false, google_routes: false },
   });
 
   const unauthorized = await fetch(`http://127.0.0.1:${port}/internal/v1/execute`, {

@@ -1,13 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadPromptFile } from "./prompts.mjs";
 
 const harnessRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function localDshCommand(platform) {
-  const executable = platform === "win32" ? "dsh.cmd" : "dsh";
-  const candidate = path.join(harnessRoot, "node_modules", ".bin", executable);
-  return fs.existsSync(candidate) ? candidate : undefined;
+function localDshLaunch() {
+  const entrypoint = path.join(
+    harnessRoot,
+    "node_modules",
+    "@deepseek-ai",
+    "dsh",
+    "lib",
+    "bin.js",
+  );
+  return fs.existsSync(entrypoint)
+    ? { command: process.execPath, prefixArgs: [entrypoint] }
+    : undefined;
 }
 
 function required(name, value) {
@@ -21,6 +30,17 @@ export function loadConfig(env = process.env) {
     throw new Error("HARNESS_MODE must be fake or deepseek");
   }
 
+  const localDsh = localDshLaunch();
+  const explicitDshCommand = env.DSH_COMMAND || undefined;
+  const googleMapsEnabled = Boolean(env.GOOGLE_MAPS_API_KEY);
+  const supervisorPromptPath = path.resolve(
+    env.TRIPFORGE_SUPERVISOR_PROMPT_PATH
+      ?? path.join(harnessRoot, "prompts", "supervisor.md"),
+  );
+  const headlessTaskPromptPath = path.resolve(
+    env.TRIPFORGE_HEADLESS_TASK_PROMPT_PATH
+      ?? path.join(harnessRoot, "prompts", "headless-task.md"),
+  );
   return {
     mode,
     host: env.HARNESS_HOST ?? "127.0.0.1",
@@ -38,13 +58,24 @@ export function loadConfig(env = process.env) {
       env.TRIPFORGE_GOOGLE_PLACES_PLUGIN_PATH
         ?? path.join(harnessRoot, "plugins", "google-places", "index.mjs"),
     ),
+    googleRoutesPlugin: path.resolve(
+      env.TRIPFORGE_GOOGLE_ROUTES_PLUGIN_PATH
+        ?? path.join(harnessRoot, "plugins", "google-routes", "index.mjs"),
+    ),
     progressPlugin: path.resolve(
       env.TRIPFORGE_PROGRESS_PLUGIN_PATH
         ?? path.join(harnessRoot, "plugins", "progress", "index.mjs"),
     ),
-    dshCommand: env.DSH_COMMAND || localDshCommand(process.platform),
+    dshCommand: explicitDshCommand || localDsh?.command,
+    dshPrefixArgs: explicitDshCommand ? [] : localDsh?.prefixArgs ?? [],
     dshPackage: env.DSH_PACKAGE ?? "@deepseek-ai/dsh",
     model: env.DSH_MODEL,
-    googlePlacesEnabled: Boolean(env.GOOGLE_MAPS_API_KEY),
+    googleMapsEnabled,
+    googleRoutesEnabled:
+      googleMapsEnabled && env.TRIPFORGE_GOOGLE_ROUTES_ENABLED === "true",
+    supervisorPromptPath,
+    supervisorPrompt: loadPromptFile(supervisorPromptPath),
+    headlessTaskPromptPath,
+    headlessTaskPrompt: loadPromptFile(headlessTaskPromptPath),
   };
 }

@@ -4,31 +4,33 @@
 
 - id: agent-default-model
   config:
-    provider: deepseek-official
-    model: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
+    provider: opencode-zen
+    model: !!js process.env.DSH_MODEL ?? 'nemotron-3.5-lightning-free'
 
-- id: system-prompt
+# OpenCode Zen is an OpenAI-compatible gateway, not the official DeepSeek API.
+# Keep credentials as environment references; no literal key enters composition.
+- id: llm-deepseek
+  disabled: true
+- id: llm-pi-ai
+  disabled: false
   config:
-    persona: >-
-      You are the TripForge travel-planning supervisor powered by {{model}}.
-      Coordinate specialized travel agents over approved, grounded tools.
-      Never invent provider entities, prices, availability, routes, or bookings.
-
-# First TripForge-owned provider plugin. A missing key disables the complete row,
-# so general and clarification runs remain usable without a Google configuration.
-- insert:
-    - id: tripforge-progress
-      name: !!js process.env.DSH_TRIPFORGE_PROGRESS_PLUGIN
-      inject: [tools]
-
-    - id: tripforge-google-places
-      name: !!js process.env.DSH_TRIPFORGE_GOOGLE_PLACES_PLUGIN
-      disabled: !!js Boolean(process.env.GOOGLE_MAPS_API_KEY) === false
-      inject: [tools, systemPrompt]
-      config:
-        apiKeyEnv: GOOGLE_MAPS_API_KEY
-        maxResults: 8
-        timeoutMs: 15000
+    providers:
+      opencode-zen:
+        displayName: OpenCode Zen
+        apiKeyEnv: DEEPSEEK_API_KEY
+        api: openai-completions
+        baseURL: !!js process.env.DEEPSEEK_BASE_URL ?? 'https://opencode.ai/zen/v1'
+        defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW_TOKENS ?? 65536)
+        defaultMaxTokens: !!js Number(process.env.DSH_MAX_OUTPUT_TOKENS ?? 4096)
+        compat:
+          thinkingFormat: deepseek
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+        models:
+          - id: !!js process.env.DSH_MODEL ?? 'nemotron-3.5-lightning-free'
+            name: TripForge configured model
+            contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW_TOKENS ?? 65536)
+            maxTokens: !!js Number(process.env.DSH_MAX_OUTPUT_TOKENS ?? 4096)
 
 # Extra model calls and interactive/browser-only facilities.
 - id: session-title
@@ -42,8 +44,6 @@
 - id: session-query-sqlite
   disabled: true
 - id: session-telemetry-otel
-  disabled: true
-- id: llm-pi-ai
   disabled: true
 
 # Coding-agent execution and filesystem capabilities.

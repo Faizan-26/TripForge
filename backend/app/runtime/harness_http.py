@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
@@ -11,6 +12,19 @@ from app.schemas.trip import PlanTripRequest
 
 class HarnessProtocolError(RuntimeError):
     pass
+
+
+ACTIVITY_SCHEMA_VERSION = "1"
+PUBLIC_ACTIVITY_TYPES = {
+    "agent.started",
+    "agent.progress",
+    "agent.completed",
+    "answer.preparing",
+    "tool.started",
+    "tool.completed",
+    "tool.failed",
+}
+_SECRET_KEY = re.compile(r"authorization|api[_-]?key|password|secret|token", re.I)
 
 
 class HarnessHttpRuntime:
@@ -60,14 +74,68 @@ def _parse_update(line: str) -> RuntimeUpdate:
     except (json.JSONDecodeError, TypeError) as exc:
         raise HarnessProtocolError("Harness returned malformed NDJSON") from exc
 
+    if not isinstance(payload, dict):
+        raise HarnessProtocolError("Harness returned an unsupported update")
+
     kind = payload.get("kind")
     if kind == "progress":
+        event_type = payload.get("type")
+        supported = event_type in PUBLIC_ACTIVITY_TYPES
+        if not supported:
+            event_type = "agent.progress"
         return RuntimeProgress(
-            type=payload.get("type", "run.progress"),
-            agent=payload.get("agent"),
-            message=payload.get("message", "Planning update"),
-            data=payload.get("data", {}),
+            type=event_type,
+            agent=_bounded_string(payload.get("agent"), 80),
+            message=(
+                _bounded_string(payload.get("message"), 300) or "Planning update"
+                if supported
+                else "Planning update"
+            ),
+            data=_public_activity_data(event_type, payload.get("data")),
         )
     if kind == "completed" and isinstance(payload.get("state"), dict):
         return RuntimeCompleted(state=payload["state"])
     raise HarnessProtocolError("Harness returned an unsupported update")
+
+
+def _public_activity_data(event_type: str, value: Any) -> dict[str, Any]:
+    source = value if isinstance(value, dict) else {}
+    allowed_by_type = {
+        "agent.started": {"runtime", "turn", "step"},
+        "agent.progress": {"runtime", "turn", "step"},
+        "agent.completed": {"runtime", "turn", "step", "duration_ms"},
+        "answer.preparing": {"turn", "step"},
+        "tool.started": {"tool", "call_id", "arguments"},
+        "tool.completed": {"tool", "call_id", "status", "duration_ms"},
+        "tool.failed": {"tool", "call_id", "status", "duration_ms", "error"},
+    }
+    result: dict[str, Any] = {"activity_schema_version": ACTIVITY_SCHEMA_VERSION}
+    for key in allowed_by_type.get(event_type, set()):
+        if key in source:
+            result[key] = _sanitize_public_value(source[key])
+    return result
+
+
+def _sanitize_public_value(value: Any, depth: int = 0) -> Any:
+    if depth > 4:
+        return "[truncated]"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:300]
+    if isinstance(value, list):
+        return [_sanitize_public_value(item, depth + 1) for item in value[:20]]
+    if isinstance(value, dict):
+        return {
+            str(key)[:80]: (
+                "[redacted]"
+                if _SECRET_KEY.search(str(key))
+                else _sanitize_public_value(item, depth + 1)
+            )
+            for key, item in list(value.items())[:30]
+        }
+    return str(value)[:100]
+
+
+def _bounded_string(value: Any, limit: int) -> str | None:
+    return value[:limit] if isinstance(value, str) and value else None

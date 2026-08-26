@@ -384,6 +384,20 @@ export type RunEvent = {
   data: Record<string, unknown>;
 };
 
+export const PUBLIC_ACTIVITY_EVENT_TYPES = [
+  "run.started",
+  "agent.started",
+  "agent.progress",
+  "agent.completed",
+  "answer.preparing",
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
+  "run.paused",
+  "run.completed",
+  "run.failed",
+] as const;
+
 export type ConversationSummary = {
   id: string;
   title: string;
@@ -430,6 +444,7 @@ export type ConversationDetail = {
   messages: ConversationMessage[];
   runs: ConversationRun[];
   artifacts: ConversationArtifact[];
+  events: RunEvent[];
 };
 
 export function isClarificationResult(value: unknown): value is ClarificationResult {

@@ -1,34 +1,187 @@
-import type { RunEvent, RunStatus } from "@/lib/trip-api/types";
+"use client";
+
+import { useMemo, useState } from "react";
+import {
+  PUBLIC_ACTIVITY_EVENT_TYPES,
+  type RunEvent,
+  type RunStatus,
+} from "@/lib/trip-api/types";
 import styles from "@/app/chat/new/chat.module.css";
 
-const thinkingLabels: Record<string, string> = {
-  supervisor: "Understanding your message",
-  general: "Thinking about your question",
-  hotel_search: "Looking for matching stays",
-  trip_scope: "Shaping a sensible route",
-  stay: "Researching where to stay",
-  activity: "Finding useful places",
-  travel_info: "Checking travel context",
-  compatibility: "Balancing distance and pace",
-  itinerary: "Building each day",
-  budget: "Checking the budget",
-  validator: "Reviewing the final plan",
-  stay_research: "Researching where to stay",
-  activity_research: "Finding useful places",
-  travel_research: "Checking travel context",
-  compatibility_ranking: "Balancing distance and pace",
+const visibleTypes = new Set<string>(PUBLIC_ACTIVITY_EVENT_TYPES);
+
+const agentLabels: Record<string, string> = {
+  supervisor: "Trip planner",
+  general: "Travel assistant",
+  hotel_search: "Stay researcher",
+  trip_scope: "Route designer",
+  stay: "Stay researcher",
+  activity: "Place researcher",
+  travel_info: "Travel researcher",
+  compatibility: "Route reviewer",
+  itinerary: "Itinerary builder",
+  budget: "Budget reviewer",
+  validator: "Plan reviewer",
+  stay_research: "Stay researcher",
+  activity_research: "Place researcher",
+  travel_research: "Travel researcher",
+  compatibility_ranking: "Route reviewer",
 };
 
-export function PlanningProgress({ events, status }: { events: RunEvent[]; status?: RunStatus }) {
-  if (!status || !["queued", "running"].includes(status)) return null;
-  const latest = [...events].reverse().find((event) => event.agent);
-  const label = latest?.agent ? thinkingLabels[latest.agent] ?? latest.message : "Reading your message";
+const toolLabels: Record<string, string> = {
+  search_google_places: "Google Places",
+  compute_google_route: "Google Routes",
+};
 
-  return <article className={styles.thinkingMessage} aria-label="TripForge is thinking" aria-live="polite">
+type ActivityItem = {
+  key: string;
+  event: RunEvent;
+  started?: RunEvent;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stringData(event: RunEvent, key: string) {
+  const value = event.data[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function activityItems(events: RunEvent[]): ActivityItem[] {
+  const result: ActivityItem[] = [];
+  const tools = new Map<string, number>();
+
+  for (const event of events) {
+    if (!visibleTypes.has(event.type)) continue;
+    if (event.type.startsWith("tool.")) {
+      const callId = stringData(event, "call_id") ?? `${event.sequence}`;
+      const existingIndex = tools.get(callId);
+      if (existingIndex === undefined) {
+        tools.set(callId, result.length);
+        result.push({ key: `tool-${callId}`, event });
+      } else {
+        const previous = result[existingIndex];
+        result[existingIndex] = {
+          ...previous,
+          event,
+          started: previous.started ?? previous.event,
+        };
+      }
+      continue;
+    }
+    if (event.type === "agent.progress") {
+      const previous = result.at(-1);
+      if (previous?.event.type === "agent.progress" && previous.event.message === event.message) continue;
+    }
+    result.push({ key: `${event.type}-${event.sequence}`, event });
+  }
+
+  return result.slice(-12);
+}
+
+function itemTitle(item: ActivityItem) {
+  const { event } = item;
+  const tool = stringData(event, "tool") ?? stringData(item.started ?? event, "tool");
+  if (tool) return toolLabels[tool] ?? tool.replaceAll("_", " ");
+  if (event.type === "run.started") return "Request received";
+  if (event.type === "run.completed") return "Response completed";
+  if (event.type === "run.paused") return "Waiting for your choices";
+  if (event.type === "run.failed") return "Planning stopped";
+  if (event.type === "answer.preparing") return "Preparing your response";
+  if (event.type === "agent.completed") return "Planning complete";
+  return event.agent ? agentLabels[event.agent] ?? "Trip planner" : "Trip planner";
+}
+
+function itemDetail(item: ActivityItem) {
+  const event = item.event;
+  const source = item.started ?? event;
+  const args = isRecord(source.data.arguments) ? source.data.arguments : undefined;
+  const query = typeof args?.query === "string" ? args.query : undefined;
+  const duration = typeof event.data.duration_ms === "number" ? event.data.duration_ms : undefined;
+  if (event.type === "tool.failed") return stringData(event, "error") ?? "The tool could not finish.";
+  if (query && duration !== undefined) return `Searched “${query}” · ${formatDuration(duration)}`;
+  if (query) return `Searching for “${query}”`;
+  if (duration !== undefined) return `Completed in ${formatDuration(duration)}`;
+  return event.message;
+}
+
+function itemState(event: RunEvent, busy: boolean) {
+  if (event.type === "tool.failed" || event.type === "run.failed") return "failed";
+  if (event.type === "tool.completed" || event.type === "agent.completed" || event.type === "run.completed") return "completed";
+  if (event.type === "run.paused") return "paused";
+  return busy ? "active" : "completed";
+}
+
+function formatDuration(milliseconds: number) {
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0)} s`;
+}
+
+function totalToolTime(events: RunEvent[]) {
+  return events.reduce((total, event) => (
+    event.type.startsWith("tool.") && typeof event.data.duration_ms === "number"
+      ? total + event.data.duration_ms
+      : total
+  ), 0);
+}
+
+function StatusGlyph({ state }: { state: string }) {
+  if (state === "completed") {
+    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 8.2 2.4 2.4L12 5" /></svg>;
+  }
+  if (state === "failed") {
+    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 5 6 6m0-6-6 6" /></svg>;
+  }
+  if (state === "paused") {
+    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4v8m4-8v8" /></svg>;
+  }
+  return <span aria-hidden="true" />;
+}
+
+export function PlanningProgress({ events, status }: { events: RunEvent[]; status?: RunStatus }) {
+  const busy = status === "queued" || status === "running";
+  const [expanded, setExpanded] = useState(true);
+  const items = useMemo(() => activityItems(events), [events]);
+
+  if (items.length === 0) return null;
+
+  const toolCount = new Set(events.flatMap((event) => {
+    const callId = stringData(event, "call_id");
+    return event.type.startsWith("tool.") && callId ? [callId] : [];
+  })).size;
+  const duration = totalToolTime(events);
+  const latest = items.at(-1)?.event.message ?? "Planning your trip";
+  const heading = busy ? "Planning your trip" : "How this response was built";
+
+  return <article className={styles.activityMessage} aria-label={heading}>
     <span className={styles.assistantMark}>TF</span>
-    <div>
-      <span>TripForge</span>
-      <p>{label}<i><b /><b /><b /></i></p>
+    <div className={styles.activityCard}>
+      <button
+        className={styles.activityToggle}
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span>
+          <strong>{heading}</strong>
+          <small aria-live="polite">{busy ? latest : `${toolCount} tool ${toolCount === 1 ? "call" : "calls"}${duration ? ` · ${formatDuration(duration)}` : ""}`}</small>
+        </span>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+      </button>
+
+      {expanded && <ol className={styles.activityTimeline}>
+        {items.map((item) => {
+          const state = itemState(item.event, busy);
+          return <li className={styles[`activity_${state}`]} key={item.key}>
+            <span className={styles.activityGlyph}><StatusGlyph state={state} /></span>
+            <span>
+              <strong>{itemTitle(item)}</strong>
+              <small>{itemDetail(item)}</small>
+            </span>
+          </li>;
+        })}
+      </ol>}
     </div>
   </article>;
 }
