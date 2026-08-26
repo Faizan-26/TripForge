@@ -336,9 +336,14 @@ class InMemoryRunManager:
                 )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("Trip planning run %s failed", record.run_id)
-            record.error = "The planning run failed. Check server logs for the provider error."
+            public_message = getattr(exc, "public_message", None)
+            record.error = (
+                public_message
+                if isinstance(public_message, str) and public_message
+                else "The planning run failed. Check server logs for the provider error."
+            )
             if self._repository:
                 try:
                     await self._repository.update_run(

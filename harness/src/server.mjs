@@ -33,6 +33,9 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
       );
       const controller = new AbortController();
       request.on("aborted", () => controller.abort());
+      response.on("close", () => {
+        if (!response.writableEnded) controller.abort();
+      });
       response.writeHead(200, {
         "content-type": "application/x-ndjson; charset=utf-8",
         "cache-control": "no-store",
@@ -43,8 +46,17 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
       }
       response.end();
     } catch (error) {
+      process.stderr.write(`[harness] execution failed: ${safeLogMessage(error)}\n`);
       if (response.headersSent) {
-        response.destroy(error);
+        if (!response.destroyed) {
+          response.end(`${JSON.stringify({
+            kind: "failed",
+            error: {
+              code: "HARNESS_EXECUTION_FAILED",
+              message: publicFailureMessage(error),
+            },
+          })}\n`);
+        }
         return;
       }
       json(response, error.statusCode ?? 500, {
@@ -52,6 +64,23 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
       });
     }
   });
+}
+
+function publicFailureMessage(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/cancelled|aborted/iu.test(message)) return "Trip planning was cancelled.";
+  if (/exceeded .*ms|timed? out/iu.test(message)) {
+    return "Trip planning took too long. Please try again.";
+  }
+  return "The planning model stopped before completing its response. Please try again.";
+}
+
+function safeLogMessage(error) {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  return message
+    .replace(/Bearer\s+[^\s]+/giu, "Bearer [redacted]")
+    .replace(/\b(?:sk|gsk)-[A-Za-z0-9_-]+\b/gu, "[redacted]")
+    .slice(0, 4000);
 }
 
 export function validateExecuteRequest(value) {

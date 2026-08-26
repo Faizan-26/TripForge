@@ -176,6 +176,14 @@ This is the continuation point for `feature/deepseek-harness`.
 - [x] Replaced the frontend's single transient thinking row with an expandable live
   activity timeline. Tool calls are paired with their outcomes and durations, the
   timeline is persisted with run events, and completed conversations rehydrate it.
+- [x] Hardened long-running turns with safe seven-second activity heartbeats, explicit
+  terminal NDJSON failure frames, actionable browser errors, and sanitized Harness logs.
+- [x] Hardened provider output parsing so wrapped JSON still reaches the question/result
+  contracts instead of appearing as raw JSON in chat.
+- [x] Normalized combined adult-and-child questions to flexible text inputs in both the
+  Harness result boundary and frontend, while retaining numeric controls for one count.
+- [x] Made clarification answers authoritative in the headless continuation prompt so
+  completed fields are not requested again.
 - [x] Added the typed, read-only `search_google_places` plugin with bounded requests,
   fixed-host enforcement, cancellation, normalized provider IDs, and native Harness
   inspector presentation metadata.
@@ -196,7 +204,7 @@ This is the continuation point for `feature/deepseek-harness`.
   Inspector-only patch for the browser services excluded from production Headless.
 - [x] Added plugin activation reporting to Harness `/health`.
 - [x] Added mocked Google provider, plugin-registration, progress-contract, HTTP, and
-  Windows launcher tests. The Harness suite currently passes 25 tests; the Next.js
+  Windows launcher tests. The Harness suite currently passes 28 tests; the Next.js
   production build and ESLint also passed during this checkpoint.
 - [x] Verified the custom composition loads in both pinned Headless and Web profiles
   without making a model call.
@@ -208,8 +216,9 @@ This is the continuation point for `feature/deepseek-harness`.
 - [ ] Implement durable Harness session continuation. Clarification currently resumes at
   the TripForge/FastAPI contract level, but the CLI adapter does not yet invoke native
   `dsh --resume` session continuation.
-- [ ] Restore and run the backend Python test suite. The checked-in Windows virtual
-  environment currently points to a missing Microsoft Store Python executable.
+- [ ] Restore the full legacy LangGraph backend test suite on this Windows host. The
+  Python 3.12 environment is repaired and the 11 Harness/runtime-manager tests pass,
+  but Windows Application Control still blocks LangGraph's native `uuid_utils` DLL.
 
 ### Not started
 

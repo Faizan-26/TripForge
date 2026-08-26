@@ -49,6 +49,8 @@ export class DeepSeekCliRuntime {
     let finished = false;
     let output;
     let failure;
+    const runStartedAt = performance.now();
+    let heartbeatIndex = 0;
     const stderr = createProgressParser(request.run_id, (event) => {
       queuedProgress.push(progress(event.agent, event.message, event.data, event.type));
       wake?.();
@@ -81,10 +83,26 @@ export class DeepSeekCliRuntime {
         continue;
       }
       await new Promise((resolve) => {
-        wake = resolve;
-        if (finished || queuedProgress.length > 0) resolve();
+        const timer = setTimeout(resolve, 7_000);
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        if (finished || queuedProgress.length > 0) wake();
       });
       wake = undefined;
+      if (!finished && queuedProgress.length === 0) {
+        const messages = [
+          "Reviewing the trip details",
+          "Checking the request for missing details",
+          "Preparing the next response",
+        ];
+        yield progress("supervisor", messages[heartbeatIndex % messages.length], {
+          runtime: "deepseek",
+          elapsed_ms: Math.round(performance.now() - runStartedAt),
+        });
+        heartbeatIndex += 1;
+      }
     }
     await running;
     if (failure) throw failure;
@@ -131,11 +149,8 @@ export function buildTask(request, template) {
 
 export function parseHarnessResult(output, sessionId) {
   const text = output.trim();
-  const fenced = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)].at(-1)?.[1];
-  let value;
-  try {
-    value = JSON.parse((fenced ?? text).trim());
-  } catch {
+  const value = parseStructuredOutput(text);
+  if (value === undefined) {
     const title = "DeepSeek trip planning session";
     return withMetadata(
       {
@@ -182,6 +197,61 @@ export function parseHarnessResult(output, sessionId) {
   throw new Error("DeepSeek Harness returned an unsupported final result schema");
 }
 
+function parseStructuredOutput(text) {
+  const candidates = [
+    ...[...text.matchAll(/```json\s*([\s\S]*?)```/gi)].map((match) => match[1]),
+    text,
+    ...balancedJsonObjects(text),
+  ];
+  for (const candidate of candidates.reverse()) {
+    let value;
+    try {
+      value = JSON.parse(candidate.trim());
+      if (typeof value === "string") value = JSON.parse(value);
+    } catch {
+      continue;
+    }
+    if (isRecord(value) && ["clarification", "general"].includes(value.outcome)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function balancedJsonObjects(text) {
+  const objects = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (character === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        objects.push(text.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+  return objects;
+}
+
 const questionKinds = new Set([
   "single_select",
   "multi_select",
@@ -201,6 +271,7 @@ function normalizeQuestions(questions) {
     const prompt = typeof question.prompt === "string" ? question.prompt.trim() : "";
     if (!/^[a-z][a-z0-9_]{0,79}$/.test(id) || !prompt || seen.has(id) || !questionKinds.has(question.kind)) return [];
     seen.add(id);
+    const kind = travelerCompositionKind(id, prompt, question.kind);
     const options = Array.isArray(question.options)
       ? question.options.slice(0, 12).flatMap((option) => {
           if (!isRecord(option)) return [];
@@ -216,7 +287,7 @@ function normalizeQuestions(questions) {
           }];
         })
       : [];
-    if ((question.kind === "single_select" || question.kind === "multi_select") && options.length === 0) return [];
+    if ((kind === "single_select" || kind === "multi_select") && options.length === 0) return [];
     const minValue = boundedNumber(question.min_value, -1_000_000_000, 1_000_000_000);
     const maxValue = boundedNumber(question.max_value, -1_000_000_000, 1_000_000_000);
     const minLength = boundedInteger(question.min_length, 0, 6000);
@@ -224,19 +295,31 @@ function normalizeQuestions(questions) {
     return [{
       id,
       prompt: prompt.slice(0, 300),
-      kind: question.kind,
+      kind,
       required: question.required !== false,
       options,
       allow_other: question.allow_other === true,
       ...(typeof question.description === "string" ? { description: question.description.slice(0, 500) } : {}),
-      ...(typeof question.placeholder === "string" ? { placeholder: question.placeholder.slice(0, 160) } : {}),
-      ...(minValue !== undefined ? { min_value: minValue } : {}),
-      ...(maxValue !== undefined ? { max_value: maxValue } : {}),
-      ...(typeof question.step === "number" && question.step > 0 ? { step: question.step } : {}),
+      ...(typeof question.placeholder === "string"
+        ? { placeholder: question.placeholder.slice(0, 160) }
+        : kind !== question.kind
+          ? { placeholder: "For example: 2 adults and 1 child" }
+          : {}),
+      ...(kind === "number" && minValue !== undefined ? { min_value: minValue } : {}),
+      ...(kind === "number" && maxValue !== undefined ? { max_value: maxValue } : {}),
+      ...(kind === "number" && typeof question.step === "number" && question.step > 0
+        ? { step: question.step }
+        : {}),
       ...(minLength !== undefined ? { min_length: minLength } : {}),
       ...(maxLength !== undefined ? { max_length: maxLength } : {}),
     }];
   });
+}
+
+function travelerCompositionKind(id, prompt, kind) {
+  const asksForCombinedCounts = /(?:adult|traveler|guest).*(?:child|children)|(?:child|children).*(?:adult|traveler|guest)/iu;
+  const compositionId = /(?:traveler|guest).*(?:composition|breakdown)/iu;
+  return asksForCombinedCounts.test(prompt) || compositionId.test(id) ? "text" : kind;
 }
 
 function boundedNumber(value, minimum, maximum) {

@@ -34,6 +34,20 @@ function answerError(question: ClarificationQuestion, answer: AnswerValue | unde
   return "";
 }
 
+function normalizeQuestionControl(question: ClarificationQuestion): ClarificationQuestion {
+  const combinedCounts = /(?:adult|traveler|guest).*(?:child|children)|(?:child|children).*(?:adult|traveler|guest)/iu;
+  const compositionId = /(?:traveler|guest).*(?:composition|breakdown)/iu;
+  if (!combinedCounts.test(question.prompt) && !compositionId.test(question.id)) return question;
+  return {
+    ...question,
+    kind: "text",
+    placeholder: question.placeholder ?? "For example: 2 adults and 1 child",
+    min_value: undefined,
+    max_value: undefined,
+    step: undefined,
+  };
+}
+
 export function ClarificationForm({
   clarification,
   disabled,
@@ -47,7 +61,7 @@ export function ClarificationForm({
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [otherQuestions, setOtherQuestions] = useState<Record<string, boolean>>({});
   const [validation, setValidation] = useState("");
-  const question = clarification.questions[step];
+  const question = normalizeQuestionControl(clarification.questions[step]);
   const isLast = step === clarification.questions.length - 1;
   const multiple = question.kind === "multi_select";
 

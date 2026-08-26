@@ -14,6 +14,12 @@ class HarnessProtocolError(RuntimeError):
     pass
 
 
+class HarnessExecutionError(HarnessProtocolError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.public_message = message
+
+
 ACTIVITY_SCHEMA_VERSION = "1"
 PUBLIC_ACTIVITY_TYPES = {
     "agent.started",
@@ -95,6 +101,12 @@ def _parse_update(line: str) -> RuntimeUpdate:
         )
     if kind == "completed" and isinstance(payload.get("state"), dict):
         return RuntimeCompleted(state=payload["state"])
+    if kind == "failed":
+        error = payload.get("error")
+        message = error.get("message") if isinstance(error, dict) else None
+        raise HarnessExecutionError(
+            message if isinstance(message, str) else "Harness execution failed"
+        )
     raise HarnessProtocolError("Harness returned an unsupported update")
 
 

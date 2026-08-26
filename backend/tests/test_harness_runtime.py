@@ -82,6 +82,26 @@ def test_harness_rejects_unknown_updates() -> None:
         _parse_update('{"kind":"reasoning","content":"private"}')
 
 
+def test_harness_maps_explicit_failure_frames_without_protocol_noise() -> None:
+    with pytest.raises(HarnessProtocolError, match="stopped before completing"):
+        _parse_update(
+            json.dumps(
+                {
+                    "kind": "failed",
+                    "error": {
+                        "code": "HARNESS_EXECUTION_FAILED",
+                        "message": "The planning model stopped before completing its response.",
+                    },
+                }
+            )
+        )
+
+
 def test_deepseek_runtime_requires_service_token() -> None:
     with pytest.raises(ValueError, match="HARNESS_SERVICE_TOKEN"):
-        Settings(agent_runtime="deepseek", supabase_auth_required=False)
+        Settings(
+            agent_runtime="deepseek",
+            harness_service_token=None,
+            supabase_auth_required=False,
+            _env_file=None,
+        )

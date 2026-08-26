@@ -99,6 +99,34 @@ test("structured clarification output maps to backend state", () => {
   assert.equal(state.harness.session_id, "session-1");
 });
 
+test("structured output is recovered from provider wrapper text", () => {
+  const state = parseHarnessResult(
+    'Response follows:\n{"outcome":"general","message":"Visit Lahore Fort early.","conversation_title":"Lahore"}\nDone.',
+    "session-1",
+  );
+  assert.equal(state.general_result.message, "Visit Lahore Fort early.");
+});
+
+test("combined adult and child questions always use a text control", () => {
+  const state = parseHarnessResult(
+    JSON.stringify({
+      outcome: "clarification",
+      questions: [{
+        id: "traveler_composition",
+        prompt: "How many adults and children are traveling?",
+        kind: "number",
+        required: true,
+        options: [],
+        min_value: 1,
+      }],
+    }),
+    "session-1",
+  );
+  assert.equal(state.clarifications[0].kind, "text");
+  assert.equal(state.clarifications[0].placeholder, "For example: 2 adults and 1 child");
+  assert.equal("min_value" in state.clarifications[0], false);
+});
+
 test("UI schema accepts bounded travel fields and removes unknown presentation data", () => {
   const state = parseHarnessResult(
     JSON.stringify({
@@ -179,4 +207,34 @@ test("HTTP service authenticates and streams NDJSON", async (context) => {
   const updates = (await response.text()).trim().split("\n").map(JSON.parse);
   assert.equal(updates[0].kind, "progress");
   assert.equal(updates.at(-1).kind, "completed");
+});
+
+test("HTTP service completes an NDJSON failure frame instead of truncating the response", async (context) => {
+  const runtime = {
+    async *execute() {
+      yield { kind: "progress", type: "agent.started", message: "Starting", data: {} };
+      throw new Error("provider connection failed");
+    },
+  };
+  const config = {
+    mode: "fake",
+    serviceToken: "test-service-token",
+    maxRequestBytes: 262_144,
+  };
+  const server = createServer({ config, runtime });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/internal/v1/execute`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-service-token",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ run_id: "run-1", conversation_id: "conversation-1", message: "Hi" }),
+  });
+  const updates = (await response.text()).trim().split("\n").map(JSON.parse);
+  assert.equal(response.status, 200);
+  assert.equal(updates.at(-1).kind, "failed");
+  assert.equal(updates.at(-1).error.code, "HARNESS_EXECUTION_FAILED");
 });
