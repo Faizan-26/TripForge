@@ -1,0 +1,4 @@
+# TripForge's prompt and travel tools are registered by the host composition.
+# This intentionally empty agent-plane overlay gives Web sessions a valid,
+# least-privilege preset without mounting the shipped coding-agent tools.
+[]

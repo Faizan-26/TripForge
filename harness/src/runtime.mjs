@@ -1,8 +1,28 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { writePluginPatch } from "./plugin-patch.mjs";
 import { renderPrompt } from "./prompts.mjs";
+import { buildFastIntake } from "./intake.mjs";
+
+export class ProviderRateLimitError extends Error {
+  constructor(retryAfterMs) {
+    const boundedRetryMs = Number.isFinite(retryAfterMs)
+      ? Math.max(1_000, Math.round(retryAfterMs))
+      : 60_000;
+    super(`Model provider rate limit is active; retry after ${boundedRetryMs}ms`);
+    this.name = "ProviderRateLimitError";
+    this.code = "PROVIDER_RATE_LIMITED";
+    this.retryAfterMs = boundedRetryMs;
+  }
+}
+
+export function isProviderRateLimitFailure(error) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /(?:RATE_LIMIT|rate limit|429 status code|HTTP 429)/iu.test(message);
+}
 
 export class FakeRuntime {
   async *execute() {
@@ -25,20 +45,61 @@ export class DeepSeekCliRuntime {
   constructor(config, platform = process.platform) {
     this.config = config;
     this.platform = platform;
+    this.conversationQueues = new Map();
+    this.providerRateLimitedUntil = 0;
   }
 
   async *execute(request, signal) {
-    process.stdout.write(`[harness] run ${request.run_id} starting with DeepSeek CLI\n`);
+    const release = await acquireConversation(
+      this.conversationQueues,
+      request.conversation_id,
+    );
+    try {
+      if (signal?.aborted) throw new Error("Harness run cancelled");
+      yield* this.executeConversation(request, signal);
+    } finally {
+      release();
+    }
+  }
+
+  async *executeConversation(request, signal) {
+    process.stdout.write(`[harness] run ${request.run_id} starting\n`);
+    const sessionId = sessionIdFor(request.conversation_id);
+    const effectiveRequest = request;
     yield progress("supervisor", "DeepSeek Harness is starting", {
       runtime: "deepseek",
-      session_id: request.conversation_id,
+      session_id: sessionId,
+      conversation_id: request.conversation_id,
     }, "agent.started");
 
-    const workspace = path.join(this.config.workspaceRoot, request.run_id);
-    await fs.mkdir(workspace, { recursive: true });
+    const intake = buildFastIntake(effectiveRequest);
+    if (intake) {
+      const persistentIntake = {
+        ...intake,
+        harness: { ...intake.harness, session_id: sessionId },
+      };
+      yield progress("supervisor", "Preparing a few quick choices", {
+        runtime: "tripforge-intake",
+      }, "answer.preparing");
+      yield completed(persistentIntake);
+      return;
+    }
+
+    const rateLimitRemainingMs = this.providerRateLimitedUntil - Date.now();
+    if (rateLimitRemainingMs > 0) {
+      throw new ProviderRateLimitError(rateLimitRemainingMs);
+    }
+
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "tripforge-harness-run-"));
+    const dshHome = path.join(workspace, ".dsh");
+    await fs.mkdir(dshHome, { recursive: true });
+    try {
+    process.stdout.write(
+      `[harness] run ${request.run_id} launching isolated DeepSeek CLI session ${sessionId}\n`,
+    );
     const pluginPatch = path.join(workspace, "tripforge.plugins.patch.yml");
     await writePluginPatch(pluginPatch, this.config);
-    const task = buildTask(request, this.config.headlessTaskPrompt);
+    const task = buildTask(effectiveRequest, this.config.headlessTaskPrompt);
     const { command, args } = commandFor(
       { ...this.config, pluginPatch },
       this.platform,
@@ -61,8 +122,9 @@ export class DeepSeekCliRuntime {
       cwd: workspace,
       env: {
         ...process.env,
-        DSH_HOME: this.config.dshHome,
+        DSH_HOME: dshHome,
         DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE ?? "read-only",
+        TRIPFORGE_DSH_SESSION_ID: sessionId,
       },
       timeoutMs: this.config.timeoutMs,
       maxOutputBytes: this.config.maxOutputBytes,
@@ -105,13 +167,33 @@ export class DeepSeekCliRuntime {
       }
     }
     await running;
-    if (failure) throw failure;
+    if (failure) {
+      if (isProviderRateLimitFailure(failure)) {
+        const configuredCooldownMs = Number(this.config.rateLimitCooldownMs);
+        const cooldownMs = Number.isFinite(configuredCooldownMs)
+          ? Math.max(1_000, configuredCooldownMs)
+          : 60_000;
+        this.providerRateLimitedUntil = Date.now() + cooldownMs;
+        throw new ProviderRateLimitError(cooldownMs);
+      }
+      throw failure;
+    }
 
     process.stdout.write(`[harness] run ${request.run_id} completed\n`);
-    yield progress("supervisor", "Response is ready", {
-      runtime: "deepseek",
-    }, "agent.completed");
-    yield completed(parseHarnessResult(output, request.conversation_id));
+    const finalState = parseHarnessResult(
+      output,
+      sessionId,
+      compactTaskContext(effectiveRequest),
+    );
+    yield completed(finalState);
+    } finally {
+      await fs.rm(workspace, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
   }
 }
 
@@ -143,11 +225,37 @@ export function commandFor(config, platform, prompt) {
 export function buildTask(request, template) {
   return renderPrompt(template, {
     USER_MESSAGE: request.message,
-    REQUEST_CONTEXT: JSON.stringify(request.payload ?? {}),
+    REQUEST_CONTEXT: JSON.stringify(compactTaskContext(request)),
   });
 }
 
-export function parseHarnessResult(output, sessionId) {
+export function compactTaskContext(request) {
+  const payload = isRecord(request.payload) ? request.payload : {};
+  const context = Array.isArray(payload.context)
+    ? payload.context.slice(-6).flatMap((turn) => {
+        if (!isRecord(turn) || !["user", "assistant"].includes(turn.role)) return [];
+        if (typeof turn.content !== "string" || !turn.content.trim()) return [];
+        const content = turn.content.trim();
+        if (content === request.message || /added the missing trip details/iu.test(content)) return [];
+        return [{ role: turn.role, content: content.slice(0, 1000) }];
+      }).slice(-4)
+    : [];
+  return {
+    ...(isRecord(payload.answers) && Object.keys(payload.answers).length > 0
+      ? { answers: payload.answers }
+      : {}),
+    ...(typeof payload.intent === "string" ? { intent: payload.intent } : {}),
+    ...(isRecord(payload.origin) ? { origin: payload.origin } : {}),
+    ...(isRecord(payload.hotel_search) ? { hotel_search: payload.hotel_search } : {}),
+    ...(isRecord(payload.selected_hotel) ? { selected_hotel: payload.selected_hotel } : {}),
+    ...(isRecord(payload.draft) && Object.keys(payload.draft).length > 0
+      ? { draft: payload.draft }
+      : {}),
+    ...(context.length > 0 ? { recent_context: context } : {}),
+  };
+}
+
+export function parseHarnessResult(output, sessionId, knownContext = {}) {
   const text = output.trim();
   const value = parseStructuredOutput(text);
   if (value === undefined) {
@@ -166,13 +274,24 @@ export function parseHarnessResult(output, sessionId) {
   }
 
   if (value?.outcome === "clarification" && Array.isArray(value.questions)) {
-    const questions = normalizeQuestions(value.questions);
+    const draft = {
+      ...(isRecord(knownContext.draft) ? knownContext.draft : {}),
+      ...(isRecord(value.draft) ? value.draft : {}),
+    };
+    const questions = normalizeQuestions(value.questions)
+      .filter((question) => !questionAlreadyAnswered(
+        question.id,
+        isRecord(knownContext.answers) ? knownContext.answers : {},
+        draft,
+      ));
     if (questions.length === 0) {
-      throw new Error("DeepSeek Harness returned clarification without valid questions");
+      throw new Error(
+        "DeepSeek Harness returned clarification without valid questions; all were invalid or previously answered",
+      );
     }
     return withMetadata(
       {
-        draft: isRecord(value.draft) ? value.draft : {},
+        draft,
         clarifications: questions,
         ui_schema_version: "1",
         conversation_title: value.conversation_title,
@@ -182,12 +301,14 @@ export function parseHarnessResult(output, sessionId) {
   }
   if (value?.outcome === "general" && typeof value.message === "string") {
     const title = value.conversation_title || "DeepSeek trip planning session";
+    const presentation = normalizePresentation(value.presentation);
     return withMetadata(
       {
         general_result: {
           intent: "GENERAL",
-          message: value.message,
+          message: value.message.trim().slice(0, presentation ? 1200 : 6000),
           conversation_title: title,
+          ...(presentation ? { presentation } : {}),
         },
         conversation_title: title,
       },
@@ -195,6 +316,28 @@ export function parseHarnessResult(output, sessionId) {
     );
   }
   throw new Error("DeepSeek Harness returned an unsupported final result schema");
+}
+
+export function sessionIdFor(conversationId) {
+  return `session-tripforge-${conversationKey(conversationId)}`;
+}
+
+function conversationKey(conversationId) {
+  return crypto.createHash("sha256").update(String(conversationId)).digest("hex").slice(0, 32);
+}
+
+async function acquireConversation(queues, conversationId) {
+  const key = String(conversationId);
+  const previous = queues.get(key) ?? Promise.resolve();
+  let unlock;
+  const current = new Promise((resolve) => { unlock = resolve; });
+  const tail = previous.then(() => current);
+  queues.set(key, tail);
+  await previous;
+  return () => {
+    unlock();
+    if (queues.get(key) === tail) queues.delete(key);
+  };
 }
 
 function parseStructuredOutput(text) {
@@ -260,6 +403,7 @@ const questionKinds = new Set([
   "location",
   "number",
   "date",
+  "date_range",
   "boolean",
 ]);
 
@@ -271,7 +415,7 @@ function normalizeQuestions(questions) {
     const prompt = typeof question.prompt === "string" ? question.prompt.trim() : "";
     if (!/^[a-z][a-z0-9_]{0,79}$/.test(id) || !prompt || seen.has(id) || !questionKinds.has(question.kind)) return [];
     seen.add(id);
-    const kind = travelerCompositionKind(id, prompt, question.kind);
+    const kind = normalizedQuestionKind(id, prompt, question.kind);
     const options = Array.isArray(question.options)
       ? question.options.slice(0, 12).flatMap((option) => {
           if (!isRecord(option)) return [];
@@ -284,6 +428,7 @@ function normalizeQuestions(questions) {
             ...(typeof option.description === "string"
               ? { description: option.description.slice(0, 300) }
               : {}),
+            ...normalizeOptionMetadata(option),
           }];
         })
       : [];
@@ -316,10 +461,191 @@ function normalizeQuestions(questions) {
   });
 }
 
+function normalizeOptionMetadata(option) {
+  const photoName = typeof option.photo_name === "string"
+    && /^places\/[^/]+\/photos\/[^/]+$/u.test(option.photo_name)
+    ? option.photo_name.slice(0, 1000)
+    : undefined;
+  const rating = boundedNumber(option.rating, 0, 5);
+  const reviewCount = boundedInteger(option.review_count, 0, 100_000_000);
+  return {
+    ...(typeof option.place_id === "string"
+      ? { place_id: option.place_id.trim().slice(0, 300) }
+      : {}),
+    ...(typeof option.address === "string"
+      ? { address: option.address.trim().slice(0, 500) }
+      : {}),
+    ...(rating !== undefined ? { rating } : {}),
+    ...(reviewCount !== undefined ? { review_count: reviewCount } : {}),
+    ...(safeHttpsUrl(option.maps_url, true) ? { maps_url: option.maps_url } : {}),
+    ...(typeof option.price_level === "string"
+      ? { price_level: option.price_level.trim().slice(0, 80) }
+      : {}),
+    ...(photoName ? { photo_name: photoName } : {}),
+    ...(typeof option.image_alt === "string"
+      ? { image_alt: option.image_alt.trim().slice(0, 200) }
+      : {}),
+    ...(typeof option.image_attribution === "string"
+      ? { image_attribution: option.image_attribution.trim().slice(0, 160) }
+      : {}),
+    ...(safeHttpsUrl(option.image_attribution_url)
+      ? { image_attribution_url: option.image_attribution_url }
+      : {}),
+  };
+}
+
+function normalizePresentation(value) {
+  if (!isRecord(value) || !["trip_plan", "travel_answer", "hotel_advice"].includes(value.kind)) {
+    return undefined;
+  }
+  const title = boundedText(value.title, 160);
+  if (!title) return undefined;
+  const facts = Array.isArray(value.facts)
+    ? value.facts.slice(0, 8).flatMap((fact) => {
+        if (!isRecord(fact)) return [];
+        const label = boundedText(fact.label, 60);
+        const factValue = boundedText(fact.value, 180);
+        return label && factValue ? [{ label, value: factValue }] : [];
+      })
+    : [];
+  const sections = Array.isArray(value.sections)
+    ? value.sections.slice(0, 12).flatMap((section) => {
+        if (!isRecord(section)) return [];
+        const sectionTitle = boundedText(section.title, 160);
+        if (!sectionTitle || !Array.isArray(section.items)) return [];
+        const items = section.items.slice(0, 8).flatMap((item) => {
+          if (!isRecord(item)) return [];
+          const itemTitle = boundedText(item.title, 180);
+          if (!itemTitle) return [];
+          return [{
+            title: itemTitle,
+            ...(boundedText(item.time, 60) ? { time: boundedText(item.time, 60) } : {}),
+            ...(boundedText(item.description, 500)
+              ? { description: boundedText(item.description, 500) }
+              : {}),
+            ...(boundedText(item.location, 240)
+              ? { location: boundedText(item.location, 240) }
+              : {}),
+            ...(safeHttpsUrl(item.maps_url, true) ? { maps_url: item.maps_url } : {}),
+          }];
+        });
+        if (items.length === 0) return [];
+        return [{
+          title: sectionTitle,
+          ...(boundedText(section.subtitle, 240)
+            ? { subtitle: boundedText(section.subtitle, 240) }
+            : {}),
+          items,
+        }];
+      })
+    : [];
+  if (sections.length === 0 && facts.length === 0) return undefined;
+  const notes = Array.isArray(value.notes)
+    ? value.notes.flatMap((note) => boundedText(note, 300) || []).slice(0, 6)
+    : [];
+  return {
+    kind: value.kind,
+    title,
+    ...(boundedText(value.summary, 500) ? { summary: boundedText(value.summary, 500) } : {}),
+    facts,
+    sections,
+    notes,
+  };
+}
+
+function boundedText(value, maximum) {
+  return typeof value === "string" ? value.trim().slice(0, maximum) : "";
+}
+
+function safeHttpsUrl(value, googleOnly = false) {
+  if (typeof value !== "string" || value.length > 2000) return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return false;
+    return !googleOnly
+      || url.hostname === "maps.google.com"
+      || url.hostname === "www.google.com"
+      || url.hostname.endsWith(".google.com");
+  } catch {
+    return false;
+  }
+}
+
+const answerAliases = [
+  ["origin", "source", "departure", "departure_location"],
+  ["destination", "destinations", "hotel_location", "location"],
+  ["travel_dates", "trip_dates", "stay_dates", "date_range", "check_in", "check_out"],
+  [
+    "traveler_composition",
+    "guest_composition",
+    "travelers",
+    "guests",
+    "adults",
+    "children",
+  ],
+  ["budget", "budget_total", "hotel_budget", "max_total_price"],
+  ["interests", "activities"],
+  ["preferred_pace", "pace"],
+  ["lodging_style", "accommodation_style"],
+  ["constraints", "preferences", "transport_preferences"],
+  ["rooms", "room_count"],
+  ["hotel_must_haves", "must_haves"],
+  ["hotel_selection", "selected_hotel"],
+];
+
+function questionAlreadyAnswered(questionId, answers, draft) {
+  const aliases = answerAliases.find((group) => group.includes(questionId)) ?? [questionId];
+  if (aliases.some((alias) => Object.hasOwn(answers, alias))) return true;
+  if (aliases.includes("origin")) return hasText(draft.origin);
+  if (aliases.includes("destination")) {
+    return hasText(draft.destination)
+      || hasText(draft.hotel_search?.destination_query)
+      || isRecord(draft.hotel_search?.location);
+  }
+  if (aliases.includes("travel_dates")) {
+    return (hasText(draft.start_date) && hasText(draft.end_date))
+      || Number.isFinite(draft.duration_days)
+      || (hasText(draft.hotel_search?.check_in) && hasText(draft.hotel_search?.check_out));
+  }
+  if (aliases.includes("traveler_composition")) {
+    return Number.isFinite(draft.travelers)
+      || Number.isFinite(draft.hotel_search?.adults);
+  }
+  if (aliases.includes("budget")) {
+    return Number.isFinite(draft.budget_total)
+      || Number.isFinite(draft.hotel_search?.max_total_price);
+  }
+  if (aliases.includes("interests")) return nonEmptyArray(draft.interests);
+  if (aliases.includes("preferred_pace")) return hasText(draft.pace);
+  if (aliases.includes("constraints")) return nonEmptyArray(draft.preferences);
+  if (aliases.includes("rooms")) return Number.isFinite(draft.hotel_search?.rooms);
+  if (aliases.includes("hotel_must_haves")) {
+    return nonEmptyArray(draft.hotel_search?.amenities);
+  }
+  if (aliases.includes("hotel_selection")) return isRecord(draft.selected_hotel);
+  return false;
+}
+
+function hasText(value) {
+  return typeof value === "string" && Boolean(value.trim());
+}
+
+function nonEmptyArray(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+
 function travelerCompositionKind(id, prompt, kind) {
   const asksForCombinedCounts = /(?:adult|traveler|guest).*(?:child|children)|(?:child|children).*(?:adult|traveler|guest)/iu;
   const compositionId = /(?:traveler|guest).*(?:composition|breakdown)/iu;
   return asksForCombinedCounts.test(prompt) || compositionId.test(id) ? "text" : kind;
+}
+
+function normalizedQuestionKind(id, prompt, kind) {
+  const travelerKind = travelerCompositionKind(id, prompt, kind);
+  if (travelerKind !== kind) return travelerKind;
+  const rangeId = /^(?:travel_dates|stay_dates|date_range|trip_dates)$/iu;
+  const asksForRange = /(?:exact|travel|trip|stay|check-in|check in).*(?:dates|check-out|check out|duration)|(?:start|arrival).*(?:end|departure)/iu;
+  return rangeId.test(id) || asksForRange.test(prompt) ? "date_range" : kind;
 }
 
 function boundedNumber(value, minimum, maximum) {
@@ -369,9 +695,28 @@ export function parseProgressLine(line) {
   }
 }
 
+export function parseResultLine(line) {
+  const prefix = "TRIPFORGE_RESULT\t";
+  if (!line.startsWith(prefix)) return undefined;
+  try {
+    const value = JSON.parse(line.slice(prefix.length));
+    return isRecord(value) && typeof value.output === "string" && value.output.trim()
+      ? value.output
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function createProgressParser(runId, onProgress) {
   let buffer = "";
+  let terminalOutput;
   const handle = (line) => {
+    const result = parseResultLine(line);
+    if (result !== undefined) {
+      terminalOutput = result;
+      return;
+    }
     const event = parseProgressLine(line);
     if (event) onProgress(event);
     else if (line) process.stderr.write(`[dsh:${runId}] ${line}\n`);
@@ -384,15 +729,17 @@ function createProgressParser(runId, onProgress) {
         handle(buffer.slice(0, newline).replace(/\r$/u, ""));
         buffer = buffer.slice(newline + 1);
       }
+      return terminalOutput;
     },
     flush() {
       if (buffer) handle(buffer.replace(/\r$/u, ""));
       buffer = "";
+      return terminalOutput;
     },
   };
 }
 
-function runProcess({
+export function runProcess({
   command,
   args,
   cwd,
@@ -414,11 +761,14 @@ function runProcess({
     let stderr = "";
     let outputBytes = 0;
     let settled = false;
+    let terminalOutput;
+    let terminalTimer;
 
     const finish = (callback) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(terminalTimer);
       signal?.removeEventListener("abort", abort);
       callback();
     };
@@ -444,13 +794,26 @@ function runProcess({
     });
     child.stderr.on("data", (chunk) => {
       const text = chunk.toString("utf8");
+      const detectedOutput = onStderr?.(text);
+      if (typeof detectedOutput === "string" && !terminalOutput) {
+        if (Buffer.byteLength(detectedOutput, "utf8") > maxOutputBytes) {
+          stop();
+          finish(() => reject(new Error("Harness output exceeded its configured limit")));
+          return;
+        }
+        terminalOutput = detectedOutput;
+        terminalTimer = setTimeout(() => {
+          stop();
+        }, 100);
+        return;
+      }
       stderr = (stderr + text).slice(-16_384);
-      onStderr?.(text);
     });
     child.on("error", (error) => finish(() => reject(error)));
     child.on("close", (code) => {
       finish(() => {
-        if (code === 0) resolve(stdout);
+        if (terminalOutput) resolve(terminalOutput);
+        else if (code === 0) resolve(stdout);
         else reject(new Error(`DeepSeek Harness exited with code ${code}: ${stderr}`));
       });
     });

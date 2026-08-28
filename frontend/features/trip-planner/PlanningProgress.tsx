@@ -51,6 +51,7 @@ function stringData(event: RunEvent, key: string) {
 function activityItems(events: RunEvent[]): ActivityItem[] {
   const result: ActivityItem[] = [];
   const tools = new Map<string, number>();
+  const agents = new Map<string, number>();
 
   for (const event of events) {
     if (!visibleTypes.has(event.type)) continue;
@@ -70,14 +71,27 @@ function activityItems(events: RunEvent[]): ActivityItem[] {
       }
       continue;
     }
-    if (event.type === "agent.progress") {
-      const previous = result.at(-1);
-      if (previous?.event.type === "agent.progress" && previous.event.message === event.message) continue;
+    if (["agent.started", "agent.progress", "agent.completed", "answer.preparing"].includes(event.type)) {
+      const agentKey = event.agent ?? "supervisor";
+      const existingIndex = agents.get(agentKey);
+      if (existingIndex === undefined) {
+        agents.set(agentKey, result.length);
+        result.push({ key: `agent-${agentKey}`, event });
+      } else {
+        result[existingIndex] = { ...result[existingIndex], event };
+      }
+      continue;
+    }
+    if (["run.paused", "run.completed", "run.failed"].includes(event.type)) {
+      const terminalIndex = result.findIndex((item) => item.key === "run-terminal");
+      if (terminalIndex === -1) result.push({ key: "run-terminal", event });
+      else result[terminalIndex] = { key: "run-terminal", event };
+      continue;
     }
     result.push({ key: `${event.type}-${event.sequence}`, event });
   }
 
-  return result.slice(-12);
+  return result.slice(-8);
 }
 
 function itemTitle(item: ActivityItem) {
@@ -99,9 +113,18 @@ function itemDetail(item: ActivityItem) {
   const args = isRecord(source.data.arguments) ? source.data.arguments : undefined;
   const query = typeof args?.query === "string" ? args.query : undefined;
   const duration = typeof event.data.duration_ms === "number" ? event.data.duration_ms : undefined;
+  const firstToken = typeof event.data.first_token_ms === "number" ? event.data.first_token_ms : undefined;
+  const outputTokens = typeof event.data.output_tokens === "number" ? event.data.output_tokens : undefined;
   if (event.type === "tool.failed") return stringData(event, "error") ?? "The tool could not finish.";
   if (query && duration !== undefined) return `Searched “${query}” · ${formatDuration(duration)}`;
   if (query) return `Searching for “${query}”`;
+  if (event.type === "agent.completed" && duration !== undefined) {
+    return [
+      `Completed in ${formatDuration(duration)}`,
+      firstToken !== undefined ? `first response ${formatDuration(firstToken)}` : undefined,
+      outputTokens !== undefined ? `${outputTokens.toLocaleString()} output tokens` : undefined,
+    ].filter(Boolean).join(" · ");
+  }
   if (duration !== undefined) return `Completed in ${formatDuration(duration)}`;
   return event.message;
 }
@@ -151,7 +174,8 @@ export function PlanningProgress({ events, status }: { events: RunEvent[]; statu
     return event.type.startsWith("tool.") && callId ? [callId] : [];
   })).size;
   const duration = totalToolTime(events);
-  const latest = items.at(-1)?.event.message ?? "Planning your trip";
+  const latest = [...events].reverse().find((event) => visibleTypes.has(event.type))?.message
+    ?? "Planning your trip";
   const heading = busy ? "Planning your trip" : "How this response was built";
 
   return <article className={styles.activityMessage} aria-label={heading}>

@@ -15,6 +15,7 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
           mode: config.mode,
           platform: process.platform,
           plugins: {
+            trip_result: config.mode === "deepseek",
             progress: config.mode === "deepseek",
             google_places: config.mode === "deepseek" && Boolean(config.googleMapsEnabled),
             google_routes: config.mode === "deepseek" && Boolean(config.googleRoutesEnabled),
@@ -52,7 +53,7 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
           response.end(`${JSON.stringify({
             kind: "failed",
             error: {
-              code: "HARNESS_EXECUTION_FAILED",
+              code: publicFailureCode(error),
               message: publicFailureMessage(error),
             },
           })}\n`);
@@ -69,10 +70,22 @@ export function createServer({ config = loadConfig(), runtime = buildRuntime(con
 function publicFailureMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/cancelled|aborted/iu.test(message)) return "Trip planning was cancelled.";
+  if (error?.code === "PROVIDER_RATE_LIMITED" || /RATE_LIMIT|rate limit|429/iu.test(message)) {
+    const retryAfterSeconds = Number.isFinite(error?.retryAfterMs)
+      ? Math.max(1, Math.ceil(error.retryAfterMs / 1000))
+      : 60;
+    return `The travel model is temporarily rate limited. Your trip details are saved. Please wait ${retryAfterSeconds} seconds before trying again.`;
+  }
   if (/exceeded .*ms|timed? out/iu.test(message)) {
     return "Trip planning took too long. Please try again.";
   }
   return "The planning model stopped before completing its response. Please try again.";
+}
+
+function publicFailureCode(error) {
+  return error?.code === "PROVIDER_RATE_LIMITED"
+    ? "PROVIDER_RATE_LIMITED"
+    : "HARNESS_EXECUTION_FAILED";
 }
 
 function safeLogMessage(error) {

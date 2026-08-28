@@ -6,11 +6,12 @@ import { useRouter } from "next/navigation";
 import { ClarificationForm } from "@/features/trip-planner/ClarificationForm";
 import { PlanningProgress } from "@/features/trip-planner/PlanningProgress";
 import { TripPlanView } from "@/features/trip-planner/TripPlanView";
+import { TravelResponse } from "@/features/trip-planner/TravelResponse";
 import { HotelSearchResults } from "@/features/hotels/HotelSearchResults";
 import { useTripPlanner } from "@/features/trip-planner/use-trip-planner";
 import { clearTripDraft, TRIP_DRAFT_KEY } from "@/lib/auth/pending-auth";
 import { useSessionStorage } from "@/lib/browser/use-session-storage";
-import type { ConversationDetail, ConversationSummary } from "@/lib/trip-api/types";
+import { isGeneralAssistantResult, type ConversationDetail, type ConversationSummary } from "@/lib/trip-api/types";
 import { deleteConversation, signOut } from "./actions";
 import styles from "./chat.module.css";
 
@@ -90,6 +91,7 @@ export function ChatWorkspace({
   const [deletePending, startDeleteTransition] = useTransition();
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const threadEndRef = useRef<HTMLDivElement>(null);
+  const clarificationRef = useRef<HTMLDivElement>(null);
   const {
     messages,
     conversationId,
@@ -115,8 +117,12 @@ export function ChatWorkspace({
   }, [draft, startRun]);
 
   useEffect(() => {
+    if (clarification) {
+      clarificationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, events, hotelResult, plan, error]);
+  }, [messages, events, hotelResult, plan, error, clarification]);
 
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -292,7 +298,9 @@ export function ChatWorkspace({
               {message.role === "assistant" && <span className={styles.assistantMark}>TF</span>}
               <div>
                 <span>{message.role === "traveler" ? "You" : "TripForge"}</span>
-                <p>{message.content}</p>
+                {message.artifact && isGeneralAssistantResult(message.artifact)
+                  ? <TravelResponse response={message.artifact} />
+                  : <p>{message.content}</p>}
                 {message.artifact && "itinerary" in message.artifact && <TripPlanView plan={message.artifact} />}
                 {message.artifact && "properties" in message.artifact && <HotelSearchResults result={message.artifact} disabled={busy} onSelect={selectHotelAndPlan} />}
               </div>
@@ -301,13 +309,19 @@ export function ChatWorkspace({
           <PlanningProgress events={events} status={status} />
           {hotelResult && !messages.some((message) => message.artifact === hotelResult) && <HotelSearchResults result={hotelResult} disabled={busy} onSelect={selectHotelAndPlan} />}
           {plan && !messages.some((message) => message.artifact === plan) && <TripPlanView plan={plan} />}
-          {error && <section className={styles.runError} role="alert"><strong>Planning paused</strong><p>{error}</p><button type="button" onClick={() => reset()}>Start again</button></section>}
+          {error && <section className={styles.runError} role="alert">
+            <strong>Planning paused</strong>
+            <p>{error}{clarification ? " Your answers are preserved—send them again to retry." : ""}</p>
+            {!clarification && <button type="button" onClick={() => reset()}>Start again</button>}
+          </section>}
+          {clarification && <div className={styles.clarificationAnchor} ref={clarificationRef}>
+            <ClarificationForm clarification={clarification} disabled={busy} onSubmit={answerClarification} />
+          </div>}
           <div ref={threadEndRef} />
         </div>}
       </div>
 
       <div className={styles.composerWrap}>
-        {clarification && <ClarificationForm clarification={clarification} disabled={busy} onSubmit={answerClarification} />}
         <form className={styles.composer} onSubmit={sendMessage}>
           <label htmlFor="trip-idea">Share your trip idea</label>
           <textarea id="trip-idea" value={idea} onChange={(event) => setIdea(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="A week in northern Pakistan with mountains, local food, and a relaxed pace…" rows={1} maxLength={6000} disabled={busy || Boolean(clarification)} />

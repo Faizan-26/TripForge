@@ -1,7 +1,7 @@
 .env
-.workspaces/
-.inspector-workspace/
-.dsh-runtime/
-.dsh-inspector/
+.workspaces*/
+.inspector-workspace*/
+.dsh-runtime*/
+.dsh-inspector*/
 node_modules/
 npm-debug.log*

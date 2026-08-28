@@ -600,14 +600,20 @@
   background: #fbf9f4;
 }
 
+.clarificationAnchor {
+  min-width: 0;
+  scroll-margin-top: 24px;
+}
+
 .clarificationStepper {
   position: relative;
   width: min(780px, 100%);
-  margin: 0 auto -18px;
-  padding: 20px 22px 36px;
-  border-radius: 16px 16px 0 0;
+  margin: 6px auto 0;
+  padding: 20px 22px;
+  border: 1px solid #d8ded7;
+  border-radius: 16px;
   background: #f1ede4;
-  box-shadow: 0 -14px 34px rgba(16, 38, 60, .09);
+  box-shadow: 0 12px 32px rgba(16, 38, 60, .07);
   animation: stepperReveal .32s both cubic-bezier(.22, 1, .36, 1);
 }
 
@@ -706,6 +712,181 @@
   border-style: dashed;
 }
 
+.hotelChoiceList {
+  margin-top: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.hotelChoice {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #cbd3cc;
+  border-radius: 14px;
+  background: #fffefa;
+  transition: border-color .18s ease, background-color .18s ease;
+}
+
+.hotelChoiceSelected {
+  border-color: #294f6f;
+  background: #f8faec;
+}
+
+.hotelChoice > button {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  border: 0;
+  background: transparent;
+  color: #10263c;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hotelChoice > button:hover:not(:disabled) {
+  background: #f7f4ed;
+}
+
+.hotelChoice > button:focus-visible {
+  outline: 3px solid #294f6f;
+  outline-offset: -3px;
+}
+
+.hotelChoice > button:disabled {
+  cursor: wait;
+  opacity: .62;
+}
+
+.hotelChoiceImage {
+  position: relative;
+  min-height: 126px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: #102b43;
+  color: #d9ee36;
+  font-size: 1.5rem;
+  font-weight: 720;
+}
+
+.hotelChoiceImage img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hotelChoiceBody {
+  min-width: 0;
+  padding: 14px 16px 12px;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+}
+
+.hotelChoiceTitle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hotelChoiceTitle strong {
+  font-size: .88rem;
+  line-height: 1.3;
+}
+
+.hotelChoiceTitle i {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid #bdc8c0;
+  border-radius: 50%;
+  color: transparent;
+}
+
+.hotelChoiceSelected .hotelChoiceTitle i {
+  border-color: #c4d626;
+  background: #d9ee36;
+  color: #10263c;
+}
+
+.hotelChoiceTitle svg,
+.hotelChoiceRating svg,
+.hotelChoiceAddress svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.hotelChoiceRating,
+.hotelChoiceAddress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hotelChoiceRating {
+  color: #294f6f;
+  font-size: .68rem;
+}
+
+.hotelChoiceRating small,
+.hotelChoiceAddress,
+.hotelChoiceDescription {
+  color: #647484;
+  font-size: .65rem;
+  line-height: 1.42;
+}
+
+.hotelChoiceAddress svg {
+  flex: 0 0 auto;
+}
+
+.hotelChoicePrice {
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #f1ede4;
+  color: #465c6d;
+  font-size: .59rem;
+  font-weight: 680;
+}
+
+.hotelChoice > footer {
+  min-height: 34px;
+  padding: 7px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #e1e5df;
+  color: #647484;
+  font-size: .59rem;
+}
+
+.hotelChoice > footer > span:last-child {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.hotelChoice > footer a {
+  color: #294f6f;
+  text-underline-offset: 2px;
+}
+
 .stepCustomAnswer {
   margin-top: 16px;
   display: grid;
@@ -732,6 +913,37 @@
   min-height: 96px;
   padding-block: 12px;
   resize: vertical;
+}
+
+.dateRangeFields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dateRangeFields label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #294f6f;
+  font-size: .68rem;
+  font-weight: 680;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .stepCustomAnswer input:focus,
@@ -1328,6 +1540,201 @@
   font: inherit;
   font-size: .74rem;
   font-weight: 680;
+}
+
+.travelResponse {
+  width: min(680px, 100%);
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+}
+
+.travelResponseHeader {
+  padding-bottom: 18px;
+  border-bottom: 1px solid #d8ded7;
+}
+
+.travelResponseHeader h2 {
+  max-width: 22ch;
+  margin: 0;
+  color: #10263c;
+  font-size: clamp(1.45rem, 3.5vw, 2.05rem);
+  line-height: 1.08;
+  letter-spacing: -.03em;
+  text-wrap: balance;
+}
+
+.travelResponseHeader p {
+  max-width: 66ch;
+  margin: 8px 0 0;
+  color: #566a78;
+  font-size: .82rem;
+  line-height: 1.55;
+}
+
+.travelFacts {
+  margin: 0;
+  padding: 14px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 14px 22px;
+  border-bottom: 1px solid #d8ded7;
+}
+
+.travelFacts div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.travelFacts dt {
+  color: #718078;
+  font-size: .59rem;
+  font-weight: 650;
+}
+
+.travelFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #20394f;
+  font-size: .77rem;
+  font-weight: 680;
+}
+
+.travelSections {
+  display: grid;
+  gap: 28px;
+}
+
+.travelSections > section {
+  min-width: 0;
+}
+
+.travelSections > section > header {
+  margin-bottom: 13px;
+}
+
+.travelSections h3 {
+  margin: 0;
+  color: #10263c;
+  font-size: .97rem;
+  line-height: 1.3;
+}
+
+.travelSections > section > header p {
+  margin: 4px 0 0;
+  color: #647484;
+  font-size: .68rem;
+  line-height: 1.45;
+}
+
+.travelSections ol {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  list-style: none;
+}
+
+.travelSections li {
+  min-width: 0;
+  padding: 13px 0;
+  display: grid;
+  grid-template-columns: minmax(54px, auto) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 13px;
+  border-top: 1px solid #e1e5df;
+}
+
+.travelItemMarker {
+  width: fit-content;
+  max-width: 94px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  background: #f1ede4;
+  color: #465c6d;
+  font-size: .59rem;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.travelSections li > div {
+  min-width: 0;
+}
+
+.travelSections h4 {
+  margin: 0;
+  color: #20394f;
+  font-size: .8rem;
+  line-height: 1.35;
+}
+
+.travelSections li p {
+  margin: 4px 0 0;
+  color: #566a78;
+  font-size: .71rem;
+  line-height: 1.5;
+  white-space: normal;
+}
+
+.travelSections li small {
+  display: block;
+  margin-top: 5px;
+  color: #718078;
+  font-size: .62rem;
+}
+
+.travelSections li > a {
+  min-height: 32px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9px;
+  background: #f1ede4;
+  color: #294f6f;
+  font-size: .62rem;
+  font-weight: 680;
+  text-decoration: none;
+}
+
+.travelSections li > a:hover {
+  background: #e7decd;
+}
+
+.travelSections li > a:focus-visible {
+  outline: 3px solid #294f6f;
+  outline-offset: 2px;
+}
+
+.travelSections li > a svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.travelNotes {
+  padding-top: 2px;
+  color: #465c6d;
+}
+
+.travelNotes summary {
+  width: fit-content;
+  color: #294f6f;
+  font-size: .7rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.travelNotes ul {
+  margin: 11px 0 0;
+  padding-inline-start: 18px;
+  color: #647484;
+  font-size: .67rem;
+  line-height: 1.55;
 }
 
 .deleteTrip {
@@ -2213,7 +2620,7 @@
   }
 
   .clarificationStepper {
-    padding: 18px 16px 34px;
+    padding: 18px 16px;
   }
 
   .clarificationStepper header {
@@ -2224,8 +2631,35 @@
     flex: 1 1 calc(50% - 4px);
   }
 
+  .hotelChoice > button {
+    grid-template-columns: 108px minmax(0, 1fr);
+  }
+
+  .hotelChoiceImage {
+    min-height: 142px;
+  }
+
+  .hotelChoice > footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hotelChoice > footer > span:last-child {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .stepCustomAnswer {
     grid-template-columns: 1fr;
+  }
+
+  .dateRangeFields {
+    grid-template-columns: 1fr;
+  }
+
+  .stepCustomAnswer input,
+  .stepCustomAnswer textarea {
+    font-size: 1rem;
   }
 
   .composer {
@@ -2269,6 +2703,15 @@
   .dayNumber {
     width: 46px;
     height: 58px;
+  }
+
+  .travelSections li {
+    grid-template-columns: minmax(48px, auto) minmax(0, 1fr);
+  }
+
+  .travelSections li > a {
+    grid-column: 2;
+    width: fit-content;
   }
 
   .hotelResultsHeader,

@@ -45,6 +45,12 @@ async def test_supabase_authentication_and_new_run_persistence_are_mocked() -> N
                 message="Plan a three day trip to Islamabad",
                 client_request_id=uuid4(),
                 client_message_id=uuid4(),
+                answers={
+                    "travel_dates": {
+                        "start_date": "2027-01-10",
+                        "end_date": "2027-01-12",
+                    }
+                },
             ),
         )
     finally:
@@ -56,6 +62,82 @@ async def test_supabase_authentication_and_new_run_persistence_are_mocked() -> N
     assert "/rest/v1/conversations" in paths
     assert "/rest/v1/messages" in paths
     assert "/rest/v1/agent_runs" in paths
+    message_request = next(
+        request
+        for request in requests
+        if request.method == "POST" and request.url.path.endswith("/messages")
+    )
+    assert json.loads(message_request.content)["metadata"]["answers"]["travel_dates"] == {
+        "start_date": "2027-01-10",
+        "end_date": "2027-01-12",
+    }
+
+
+async def test_existing_conversation_hydrates_harness_context_from_supabase() -> None:
+    user_id = uuid4()
+    conversation_id = uuid4()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith("/conversations"):
+            return httpx.Response(200, json=[{"id": str(conversation_id)}])
+        if request.method == "GET" and request.url.path.endswith("/messages"):
+            return httpx.Response(200, json=[
+                {
+                    "role": "assistant",
+                    "content": "Which hotel would you prefer?",
+                    "metadata": {},
+                    "created_at": "2026-08-28T12:01:00Z",
+                },
+                {
+                    "role": "user",
+                    "content": "Plan a trip to Lahore",
+                    "metadata": {
+                        "answers": {"destination": "Lahore", "budget": "PKR 20000"},
+                        "draft": {"destination": "Lahore", "pace": "relaxed"},
+                    },
+                    "created_at": "2026-08-28T12:00:00Z",
+                },
+            ])
+        if request.method == "POST" and request.url.path.endswith("/messages"):
+            return httpx.Response(201, json=[{"id": 43}])
+        return httpx.Response(201, json=[])
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    gateway = SupabaseGateway(
+        Settings(
+            _env_file=None,
+            supabase_url="https://example.supabase.co",
+            supabase_publishable_key="sb_publishable_test",
+            supabase_secret_key="sb_secret_test",
+        ),
+        client=client,
+    )
+    request = PlanTripRequest(
+        message="I choose Canal View Hotel",
+        conversation_id=conversation_id,
+        answers={"hotel_selection": "place-1"},
+        draft={"selected_hotel_name": "Canal View Hotel"},
+        context=[{"role": "user", "content": "Untrusted browser history"}],
+    )
+    try:
+        await gateway.prepare_run(user_id=user_id, run_id=uuid4(), request=request)
+    finally:
+        await client.aclose()
+
+    assert [turn.content for turn in request.context] == [
+        "Plan a trip to Lahore",
+        "Which hotel would you prefer?",
+    ]
+    assert request.answers == {
+        "destination": "Lahore",
+        "budget": "PKR 20000",
+        "hotel_selection": "place-1",
+    }
+    assert request.draft == {
+        "destination": "Lahore",
+        "pace": "relaxed",
+        "selected_hotel_name": "Canal View Hotel",
+    }
 
 
 async def test_supabase_rejects_invalid_access_token() -> None:
@@ -205,6 +287,13 @@ async def test_general_result_is_saved_as_chat_message_without_artifact() -> Non
                 "intent": "GENERAL",
                 "message": "Hello from TripForge",
                 "conversation_title": "Travel conversation",
+                "presentation": {
+                    "kind": "travel_answer",
+                    "title": "Welcome",
+                    "facts": [{"label": "Mode", "value": "Conversation"}],
+                    "sections": [],
+                    "notes": [],
+                },
             },
             needs_clarification=False,
         )
@@ -220,7 +309,9 @@ async def test_general_result_is_saved_as_chat_message_without_artifact() -> Non
         if request.method == "POST" and request.url.path.endswith("/messages")
     )
     assert artifact_requests == []
-    assert json.loads(message.content)["content"] == "Hello from TripForge"
+    message_payload = json.loads(message.content)
+    assert message_payload["content"] == "Hello from TripForge"
+    assert message_payload["metadata"]["presentation"]["title"] == "Welcome"
 
 
 async def test_generated_title_only_targets_default_titles() -> None:

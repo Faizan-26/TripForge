@@ -1,30 +1,62 @@
 const PREFIX = "TRIPFORGE_PROGRESS\t";
+const RESULT_PREFIX = "TRIPFORGE_RESULT\t";
 const REDACTED_KEY = /authorization|api[_-]?key|password|secret|token/i;
 const ACTIVITY_SCHEMA_VERSION = "1";
+const UPDATE_INTERVAL_MS = 5_000;
 
 export const name = "tripforge-progress";
 export const inject = ["tools", "sessions"];
 
 export function apply(ctx) {
   const startedAt = new WeakMap();
-  ctx.on("session/event", (_session, event) => {
+  const sessionState = new WeakMap();
+  ctx.on("session/event", (session, event) => {
     if (event.type === "turn/start") {
+      sessionState.set(session, {
+        turnStartedAt: event.time,
+        stepStartedAt: undefined,
+        firstTokenAt: undefined,
+        lastUpdateAt: 0,
+      });
       publish({
         type: "agent.progress",
         agent: "supervisor",
         message: "Reviewing your trip request",
-        data: { turn: event.data.turn },
+        data: { turn: event.data.turn, phase: "planning" },
       });
       return;
     }
     if (event.type === "step/start") {
+      const state = stateFor(sessionState, session);
+      state.stepStartedAt = event.time;
+      state.firstTokenAt = undefined;
+      state.lastUpdateAt = 0;
       publish({
         type: "agent.progress",
         agent: "supervisor",
-        message: event.data.step === 1
-          ? "Working out the best next step"
-          : "Refining the trip response",
-        data: { turn: event.data.turn, step: event.data.step },
+        message: event.data.step === 1 ? "Travel model is responding" : "Refining the trip response",
+        data: { turn: event.data.turn, step: event.data.step, phase: "model_request" },
+      });
+      return;
+    }
+    if (event.type === "assistant/chunk") {
+      const chunkType = event.data.chunk?.type;
+      if (chunkType !== "reasoning-delta" && chunkType !== "text-delta") return;
+      const state = stateFor(sessionState, session);
+      if (state.firstTokenAt === undefined) state.firstTokenAt = event.time;
+      if (event.time - state.lastUpdateAt < UPDATE_INTERVAL_MS) return;
+      state.lastUpdateAt = event.time;
+      publish({
+        type: "agent.progress",
+        agent: "supervisor",
+        message: chunkType === "reasoning-delta"
+          ? "Evaluating your preferences and constraints"
+          : "Drafting the trip response",
+        data: timingData(state, event.time, {
+          turn: event.data.turn,
+          step: event.data.step,
+          phase: chunkType === "reasoning-delta" ? "evaluation" : "drafting",
+        }),
       });
       return;
     }
@@ -32,16 +64,34 @@ export function apply(ctx) {
       const content = Array.isArray(event.data.message?.content)
         ? event.data.message.content
         : [];
-      const hasFinalText = content.some((block) => (
-        block?.type === "text" && typeof block.text === "string" && block.text.trim()
-      ));
+      const finalText = content
+        .filter((block) => block?.type === "text" && typeof block.text === "string")
+        .map((block) => block.text)
+        .join("")
+        .trim();
       const hasToolCall = content.some((block) => block?.type === "tool-call");
-      if (!hasFinalText || hasToolCall) return;
+      if (!finalText || hasToolCall) return;
+      const state = stateFor(sessionState, session);
       publish({
         type: "answer.preparing",
         agent: "supervisor",
-        message: "Preparing your response",
-        data: { turn: event.data.turn, step: event.data.step },
+        message: "Finalizing your response",
+        data: timingData(state, event.time, {
+          turn: event.data.turn,
+          step: event.data.step,
+          phase: "finalizing",
+        }),
+      });
+      publish({
+        type: "agent.completed",
+        agent: "supervisor",
+        message: "Travel model completed",
+        data: timingData(state, event.time, {
+          turn: event.data.turn,
+          step: event.data.step,
+          phase: "model_completed",
+          ...usageData(event.data.usage),
+        }),
       });
     }
   });
@@ -55,7 +105,9 @@ export function apply(ctx) {
       data: {
         tool: exec.name,
         call_id: String(exec.callId),
-        arguments: sanitize(exec.arguments),
+        arguments: exec.name === "submit_trip_response"
+          ? { outcome: exec.arguments?.response?.outcome ?? exec.arguments?.outcome }
+          : sanitize(exec.arguments),
       },
     });
     return next();
@@ -84,6 +136,10 @@ export function formatProgressLine(event) {
   return `${PREFIX}${JSON.stringify(event)}\n`;
 }
 
+export function formatResultLine(output) {
+  return `${RESULT_PREFIX}${JSON.stringify({ output })}\n`;
+}
+
 function publish(event) {
   process.stderr.write(formatProgressLine({
     ...event,
@@ -92,6 +148,40 @@ function publish(event) {
       ...(event.data ?? {}),
     },
   }));
+}
+
+function stateFor(states, session) {
+  let state = states.get(session);
+  if (!state) {
+    state = {
+      turnStartedAt: undefined,
+      stepStartedAt: undefined,
+      firstTokenAt: undefined,
+      lastUpdateAt: 0,
+    };
+    states.set(session, state);
+  }
+  return state;
+}
+
+function timingData(state, now, extra = {}) {
+  const startedAt = state.stepStartedAt ?? state.turnStartedAt;
+  return {
+    ...extra,
+    ...(startedAt === undefined ? {} : { duration_ms: Math.max(0, now - startedAt) }),
+    ...(state.stepStartedAt === undefined || state.firstTokenAt === undefined
+      ? {}
+      : { first_token_ms: Math.max(0, state.firstTokenAt - state.stepStartedAt) }),
+  };
+}
+
+function usageData(usage) {
+  if (!usage || typeof usage !== "object") return {};
+  return {
+    ...(Number.isFinite(usage.inputTokens) ? { input_tokens: usage.inputTokens } : {}),
+    ...(Number.isFinite(usage.outputTokens) ? { output_tokens: usage.outputTokens } : {}),
+    ...(Number.isFinite(usage.reasoningTokens) ? { reasoning_tokens: usage.reasoningTokens } : {}),
+  };
 }
 
 function agentId(exec) {
@@ -103,6 +193,7 @@ function toolMessage(tool, phase) {
   const labels = {
     search_google_places: "Google Places search",
     compute_google_route: "Google route calculation",
+    submit_trip_response: "Trip response",
   };
   const label = labels[tool] ?? tool.replaceAll("_", " ");
   return `${label} ${phase}`;

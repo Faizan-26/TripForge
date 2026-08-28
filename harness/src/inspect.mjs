@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writePluginPatch } from "./plugin-patch.mjs";
@@ -52,6 +53,11 @@ export function buildInspectorLaunch(
     env.TRIPFORGE_PROGRESS_PLUGIN_PATH
       ?? path.join("plugins", "progress", "index.mjs"),
   );
+  const tripResultPlugin = path.resolve(
+    harnessRoot,
+    env.TRIPFORGE_RESULT_PLUGIN_PATH
+      ?? path.join("plugins", "trip-result", "index.mjs"),
+  );
   const supervisorPromptPath = path.resolve(
     harnessRoot,
     env.TRIPFORGE_SUPERVISOR_PROMPT_PATH
@@ -65,17 +71,24 @@ export function buildInspectorLaunch(
     harnessRoot,
     env.DSH_INSPECTOR_HOME ?? ".dsh-inspector",
   );
+  const agentPresetRoot = path.resolve(
+    harnessRoot,
+    env.TRIPFORGE_AGENT_PRESET_ROOT ?? path.join("config", "agent-presets"),
+  );
   const pluginPatch = path.join(cwd, "tripforge.plugins.patch.yml");
 
   return {
     command,
     cwd,
     dshHome,
+    ephemeralDshHome: env.HARNESS_INSPECTOR_EPHEMERAL !== "false",
     pluginPatch,
     pluginConfig: {
       googlePlacesPlugin,
       googleRoutesPlugin,
       progressPlugin,
+      tripResultPlugin,
+      persistentHeadlessEnabled: false,
       googleMapsEnabled: Boolean(env.GOOGLE_MAPS_API_KEY),
       googleRoutesEnabled:
         Boolean(env.GOOGLE_MAPS_API_KEY)
@@ -102,6 +115,7 @@ export function buildInspectorLaunch(
       ...env,
       DSH_HOME: dshHome,
       DSH_PERMISSION_MODE: "read-only",
+      TRIPFORGE_AGENT_PRESET_ROOT: agentPresetRoot,
     },
   };
 }
@@ -112,15 +126,18 @@ export async function runInspector(
   extraArgs = process.argv.slice(2),
 ) {
   const launch = buildInspectorLaunch(env, platform, extraArgs);
+  const runtimeDshHome = launch.ephemeralDshHome
+    ? await fsPromises.mkdtemp(path.join(os.tmpdir(), "tripforge-dsh-inspector-"))
+    : launch.dshHome;
   await Promise.all([
     fsPromises.mkdir(launch.cwd, { recursive: true }),
-    fsPromises.mkdir(launch.dshHome, { recursive: true }),
+    fsPromises.mkdir(runtimeDshHome, { recursive: true }),
   ]);
   await writePluginPatch(launch.pluginPatch, launch.pluginConfig);
 
   const child = spawn(launch.command, launch.args, {
     cwd: launch.cwd,
-    env: launch.env,
+    env: { ...launch.env, DSH_HOME: runtimeDshHome },
     shell: false,
     stdio: "inherit",
     windowsHide: true,
@@ -129,15 +146,28 @@ export async function runInspector(
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
-  return new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (code, signal) => {
-      process.removeListener("SIGINT", stop);
-      process.removeListener("SIGTERM", stop);
-      if (signal) reject(new Error(`TripForge inspector stopped by ${signal}`));
-      else resolve(code ?? 1);
+  try {
+    return await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => {
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
+        if (signal) reject(new Error(`TripForge inspector stopped by ${signal}`));
+        else resolve(code ?? 1);
+      });
     });
-  });
+  } finally {
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+    if (launch.ephemeralDshHome) {
+      await fsPromises.rm(runtimeDshHome, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  }
 }
 
 function parsePort(value) {

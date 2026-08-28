@@ -7,7 +7,10 @@ import {
 } from "../plugins/google-places/index.mjs";
 
 function execution() {
-  return { signal: new AbortController().signal };
+  return {
+    signal: new AbortController().signal,
+    agent: { session: { id: "session-google-places-test" } },
+  };
 }
 
 test("Google Places Cordis plugin registers one typed tool and prompt section", () => {
@@ -48,6 +51,15 @@ test("Google Places plugin sends a bounded request and normalizes provider ident
           rating: 4.7,
           userRatingCount: 321,
           currentOpeningHours: { openNow: true },
+          photos: [{
+            name: "places/ChIJ-tripforge/photos/photo-1",
+            widthPx: 1600,
+            heightPx: 900,
+            authorAttributions: [{
+              displayName: "Example photographer",
+              uri: "https://example.com/photographer",
+            }],
+          }],
         }],
       }), { status: 200, headers: { "content-type": "application/json" } });
     },
@@ -75,7 +87,15 @@ test("Google Places plugin sends a bounded request and normalizes provider ident
     rating: 4.7,
     user_rating_count: 321,
     open_now: true,
+    photo: {
+      name: "places/ChIJ-tripforge/photos/photo-1",
+      width_px: 1600,
+      height_px: 900,
+      author_name: "Example photographer",
+      author_uri: "https://example.com/photographer",
+    },
   });
+  assert.match(request.options.headers["x-goog-fieldmask"], /places\.photos/u);
 });
 
 test("Google Places plugin rejects unsafe endpoints and invalid location bias", async () => {

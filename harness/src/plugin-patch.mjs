@@ -11,6 +11,9 @@ function pluginUrl(pluginPath) {
 
 export function renderPluginPatch({
   progressPlugin,
+  tripResultPlugin,
+  persistentHeadlessPlugin,
+  persistentHeadlessEnabled = true,
   googlePlacesPlugin,
   googleRoutesPlugin,
   googleMapsEnabled,
@@ -22,7 +25,19 @@ export function renderPluginPatch({
   config:
     persona: ${yamlString(supervisorPrompt)}
 
+${persistentHeadlessEnabled ? `- id: headless-runner
+  disabled: true
+` : ""}
+
 - insert:
+${persistentHeadlessEnabled ? `    - id: tripforge-persistent-headless
+      name: ${pluginUrl(persistentHeadlessPlugin)}
+      inject: [agentDefaultModel, agents, sessions, sessionPersistence, headlessStartup]
+
+` : ""}    - id: tripforge-result
+      name: ${pluginUrl(tripResultPlugin)}
+      inject: [tools, systemPrompt]
+
     - id: tripforge-progress
       name: ${pluginUrl(progressPlugin)}
       inject: [tools, sessions]

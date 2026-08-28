@@ -30,11 +30,16 @@ test("Windows inspector uses the local DSH Web profile and isolated workspace", 
   ]);
   assert.equal(path.basename(launch.cwd), ".inspector-workspace");
   assert.equal(path.basename(launch.dshHome), ".dsh-inspector");
+  assert.equal(launch.ephemeralDshHome, true);
   assert.equal(path.dirname(launch.pluginPatch), launch.cwd);
   assert.equal(launch.pluginConfig.googleMapsEnabled, false);
   assert.equal(launch.pluginConfig.googleRoutesEnabled, false);
   assert.match(launch.pluginConfig.supervisorPrompt, /TripForge/u);
   assert.equal(launch.env.DSH_PERMISSION_MODE, "read-only");
+  assert.equal(
+    path.basename(launch.env.TRIPFORGE_AGENT_PRESET_ROOT),
+    "agent-presets",
+  );
 });
 
 test("Inspector rejects unsafe ports before starting DSH", () => {

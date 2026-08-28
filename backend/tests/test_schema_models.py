@@ -11,6 +11,7 @@ from app.schemas.trip import (
     ClarificationOption,
     ClarificationQuestion,
     CompatibilityResult,
+    DateRangeAnswer,
     GooglePlacePayload,
     ItineraryAssignment,
     ItineraryDay,
@@ -23,6 +24,7 @@ from app.schemas.trip import (
     RouteLeg,
     ScopeDecision,
     TravelMode,
+    TravelPresentation,
     TripPlan,
     TripRequestDraft,
     TripRequirements,
@@ -111,19 +113,32 @@ def test_request_models_derive_dates_and_reject_invalid_ranges() -> None:
     )
     request = PlanTripRequest(
         message="Plan a trip to Islamabad",
-        answers={"travelers": 2, "interests": ["food"]},
+        answers={
+            "travelers": 2,
+            "interests": ["food"],
+            "travel_dates": {"start_date": "2027-01-10", "end_date": "2027-01-12"},
+        },
         origin={"address": "Lahore"},
     )
 
     assert draft.duration_days == 3
     assert request.origin is not None
     assert request.origin.address == "Lahore"
+    assert request.answers["travel_dates"] == DateRangeAnswer(
+        start_date=date(2027, 1, 10),
+        end_date=date(2027, 1, 12),
+    )
 
     with pytest.raises(ValidationError):
         TripRequestDraft(start_date=date(2027, 1, 12), end_date=date(2027, 1, 10))
     assert PlanTripRequest(message="hi").message == "hi"
     with pytest.raises(ValidationError):
         PlanTripRequest(message="   ")
+    with pytest.raises(ValidationError):
+        PlanTripRequest(
+            message="invalid dates",
+            answers={"travel_dates": {"start_date": "2027-01-12", "end_date": "2027-01-10"}},
+        )
 
 
 def test_clarification_scope_and_research_models() -> None:
@@ -143,6 +158,11 @@ def test_clarification_scope_and_research_models() -> None:
         prompt="When should the trip start?",
         kind="date",
         description="Choose a preferred date.",
+    )
+    date_range_question = ClarificationQuestion(
+        id="travel_dates",
+        prompt="Choose your trip dates",
+        kind="date_range",
     )
     with pytest.raises(ValidationError):
         ClarificationQuestion(
@@ -172,9 +192,40 @@ def test_clarification_scope_and_research_models() -> None:
 
     assert question.options[0].value == "balanced"
     assert date_question.kind == "date"
+    assert date_range_question.kind == "date_range"
     assert scope.base_regions == ["Islamabad"]
     assert research.candidates[0].source.provider_id == "provider-activity"
     assert compatibility.distances_km["provider-activity"] == 2.5
+
+
+def test_hotel_choice_media_is_serialized_as_a_tripforge_url() -> None:
+    option = ClarificationOption(
+        value="place-1",
+        label="Canal View Hotel",
+        photo_name="places/place-1/photos/photo-1",
+        rating=4.6,
+        review_count=812,
+    )
+    payload = option.model_dump(mode="json")
+
+    assert "photo_name" not in payload
+    assert payload["image_url"] == (
+        "/api/place-photos?name=places%2Fplace-1%2Fphotos%2Fphoto-1"
+    )
+
+
+def test_travel_presentation_requires_renderable_content() -> None:
+    presentation = TravelPresentation(
+        kind="trip_plan",
+        title="Three days in Lahore",
+        facts=[{"label": "Budget", "value": "PKR 20,000"}],
+        sections=[{
+            "title": "Day 1 — Arrival",
+            "items": [{"time": "Evening", "title": "Gawalmandi Food Street"}],
+        }],
+    )
+
+    assert presentation.sections[0].items[0].time == "Evening"
 
 
 def test_itinerary_route_budget_and_validation_models_round_trip() -> None:

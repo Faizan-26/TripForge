@@ -48,9 +48,11 @@ export function loadConfig(env = process.env) {
     serviceToken: required("HARNESS_SERVICE_TOKEN", env.HARNESS_SERVICE_TOKEN),
     maxRequestBytes: Number.parseInt(env.HARNESS_MAX_REQUEST_BYTES ?? "262144", 10),
     timeoutMs: Number.parseInt(env.HARNESS_RUN_TIMEOUT_MS ?? "300000", 10),
+    rateLimitCooldownMs: Number.parseInt(
+      env.HARNESS_RATE_LIMIT_COOLDOWN_MS ?? "60000",
+      10,
+    ),
     maxOutputBytes: Number.parseInt(env.HARNESS_MAX_OUTPUT_BYTES ?? "1048576", 10),
-    workspaceRoot: path.resolve(env.HARNESS_WORKSPACE_ROOT ?? ".workspaces"),
-    dshHome: path.resolve(env.DSH_HOME ?? ".dsh-runtime"),
     tripforgePatch: path.resolve(
       env.DSH_TRIPFORGE_PATCH ?? path.join(harnessRoot, "config", "tripforge.patch.yml"),
     ),
@@ -66,6 +68,15 @@ export function loadConfig(env = process.env) {
       env.TRIPFORGE_PROGRESS_PLUGIN_PATH
         ?? path.join(harnessRoot, "plugins", "progress", "index.mjs"),
     ),
+    tripResultPlugin: path.resolve(
+      env.TRIPFORGE_RESULT_PLUGIN_PATH
+        ?? path.join(harnessRoot, "plugins", "trip-result", "index.mjs"),
+    ),
+    persistentHeadlessPlugin: path.resolve(
+      env.TRIPFORGE_PERSISTENT_HEADLESS_PLUGIN_PATH
+        ?? path.join(harnessRoot, "plugins", "persistent-headless", "index.mjs"),
+    ),
+    persistentHeadlessEnabled: true,
     dshCommand: explicitDshCommand || localDsh?.command,
     dshPrefixArgs: explicitDshCommand ? [] : localDsh?.prefixArgs ?? [],
     dshPackage: env.DSH_PACKAGE ?? "@deepseek-ai/dsh",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date as Date
 from enum import StrEnum
 from typing import Any, Literal
+from urllib.parse import urlencode
 from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
@@ -31,7 +32,18 @@ class TravelMode(StrEnum):
     TRANSIT = "TRANSIT"
 
 
-AnswerValue = str | int | float | bool | list[str]
+class DateRangeAnswer(APIModel):
+    start_date: Date
+    end_date: Date
+
+    @model_validator(mode="after")
+    def validate_order(self) -> DateRangeAnswer:
+        if self.end_date < self.start_date:
+            raise ValueError("end_date cannot be before start_date")
+        return self
+
+
+AnswerValue = str | int | float | bool | list[str] | DateRangeAnswer
 
 
 class ConversationTurn(APIModel):
@@ -39,10 +51,45 @@ class ConversationTurn(APIModel):
     content: str = Field(min_length=1, max_length=6000)
 
 
+class TravelPresentationFact(APIModel):
+    label: str = Field(min_length=1, max_length=60)
+    value: str = Field(min_length=1, max_length=180)
+
+
+class TravelPresentationItem(APIModel):
+    title: str = Field(min_length=1, max_length=180)
+    time: str | None = Field(default=None, max_length=60)
+    description: str | None = Field(default=None, max_length=500)
+    location: str | None = Field(default=None, max_length=240)
+    maps_url: str | None = Field(default=None, max_length=2000)
+
+
+class TravelPresentationSection(APIModel):
+    title: str = Field(min_length=1, max_length=160)
+    subtitle: str | None = Field(default=None, max_length=240)
+    items: list[TravelPresentationItem] = Field(min_length=1, max_length=8)
+
+
+class TravelPresentation(APIModel):
+    kind: Literal["trip_plan", "travel_answer", "hotel_advice"]
+    title: str = Field(min_length=1, max_length=160)
+    summary: str | None = Field(default=None, max_length=500)
+    facts: list[TravelPresentationFact] = Field(default_factory=list, max_length=8)
+    sections: list[TravelPresentationSection] = Field(default_factory=list, max_length=12)
+    notes: list[str] = Field(default_factory=list, max_length=6)
+
+    @model_validator(mode="after")
+    def has_renderable_content(self) -> TravelPresentation:
+        if not self.facts and not self.sections:
+            raise ValueError("presentation requires facts or sections")
+        return self
+
+
 class GeneralAssistantResult(APIModel):
     intent: Literal["GENERAL"] = "GENERAL"
     message: str = Field(min_length=1, max_length=6000)
     conversation_title: str = Field(min_length=1, max_length=80)
+    presentation: TravelPresentation | None = None
 
 
 class PlanTripRequest(APIModel):
@@ -52,6 +99,7 @@ class PlanTripRequest(APIModel):
     client_message_id: UUID | None = None
     title: str | None = Field(default=None, min_length=1, max_length=200)
     answers: dict[str, AnswerValue] = Field(default_factory=dict)
+    draft: dict[str, Any] = Field(default_factory=dict)
     origin: LocationInput | None = None
     parent_run_id: UUID | None = None
     intent: Intent | None = None
@@ -89,7 +137,7 @@ class DynamicTripDraft(APIModel):
     selected_hotel: SelectedHotelContext | None = None
 
     @model_validator(mode="after")
-    def derive_duration(self) -> "DynamicTripDraft":
+    def derive_duration(self) -> DynamicTripDraft:
         if self.start_date and self.end_date:
             if self.end_date < self.start_date:
                 raise ValueError("end_date cannot be before start_date")
@@ -126,6 +174,25 @@ class ClarificationOption(APIModel):
     value: str = Field(min_length=1, max_length=200)
     label: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=300)
+    place_id: str | None = Field(default=None, max_length=300)
+    address: str | None = Field(default=None, max_length=500)
+    rating: float | None = Field(default=None, ge=0, le=5)
+    review_count: int | None = Field(default=None, ge=0)
+    maps_url: str | None = Field(default=None, max_length=2000)
+    price_level: str | None = Field(default=None, max_length=80)
+    photo_name: str | None = Field(default=None, max_length=1000, exclude=True)
+    image_url: str | None = Field(default=None, max_length=2000)
+    image_alt: str | None = Field(default=None, max_length=200)
+    image_attribution: str | None = Field(default=None, max_length=160)
+    image_attribution_url: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def attach_client_media_url(self) -> ClarificationOption:
+        if self.photo_name:
+            if not self.photo_name.startswith("places/") or "/photos/" not in self.photo_name:
+                raise ValueError("photo_name must be a Google Places photo resource")
+            self.image_url = f"/api/place-photos?{urlencode({'name': self.photo_name})}"
+        return self
 
 
 class ClarificationQuestion(APIModel):
@@ -139,6 +206,7 @@ class ClarificationQuestion(APIModel):
         "location",
         "number",
         "date",
+        "date_range",
         "boolean",
     ]
     required: bool = True
@@ -153,7 +221,7 @@ class ClarificationQuestion(APIModel):
     max_length: int | None = Field(default=None, ge=1, le=6000)
 
     @model_validator(mode="after")
-    def validate_question_shape(self) -> "ClarificationQuestion":
+    def validate_question_shape(self) -> ClarificationQuestion:
         if self.kind in {"single_select", "multi_select"} and not self.options:
             raise ValueError("select questions require at least one option")
         if self.min_value is not None and self.max_value is not None:

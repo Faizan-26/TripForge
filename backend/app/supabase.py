@@ -9,7 +9,7 @@ import httpx
 
 from app.core.config import Settings
 from app.schemas.events import RunEvent, RunSnapshot
-from app.schemas.trip import PlanTripRequest
+from app.schemas.trip import ConversationTurn, PlanTripRequest
 
 
 class AuthenticationError(Exception):
@@ -115,6 +115,10 @@ class SupabaseGateway:
             )
             if not rows:
                 raise AuthenticationError("Conversation not found or not owned by this user")
+            await self._hydrate_request_from_conversation(
+                conversation_id=conversation_id,
+                request=request,
+            )
         else:
             await self._request(
                 "POST",
@@ -154,7 +158,9 @@ class SupabaseGateway:
                 "status": "complete",
                 "content": request.message,
                 "client_message_id": str(request.client_message_id or uuid4()),
-                "metadata": {"answers": request.answers},
+                "metadata": {
+                    **request.model_dump(mode="json", include={"answers", "draft"}),
+                },
             },
         )
         trigger_message_id = messages[0]["id"]
@@ -179,6 +185,44 @@ class SupabaseGateway:
             },
         )
         return conversation_id
+
+    async def _hydrate_request_from_conversation(
+        self,
+        *,
+        conversation_id: UUID,
+        request: PlanTripRequest,
+    ) -> None:
+        rows = await self._request(
+            "GET",
+            "messages",
+            params={
+                "select": "role,content,metadata,created_at",
+                "conversation_id": f"eq.{conversation_id}",
+                "status": "eq.complete",
+                "order": "created_at.desc",
+                "limit": "12",
+            },
+        )
+        context = []
+        stored_answers: dict[str, Any] = {}
+        stored_draft: dict[str, Any] = {}
+        for row in reversed(rows if isinstance(rows, list) else []):
+            role = row.get("role")
+            content = row.get("content")
+            if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                context.append({"role": role, "content": content[:6000]})
+            metadata = row.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            answers = metadata.get("answers")
+            if isinstance(answers, dict):
+                stored_answers.update(answers)
+            draft = metadata.get("draft")
+            if isinstance(draft, dict):
+                stored_draft.update(draft)
+        request.context = [ConversationTurn.model_validate(turn) for turn in context[-12:]]
+        request.answers = {**stored_answers, **request.answers}
+        request.draft = {**stored_draft, **request.draft}
 
     async def update_run(self, run_id: UUID, **values: Any) -> None:
         await self._request(
@@ -228,6 +272,8 @@ class SupabaseGateway:
                     "metadata": {
                         "run_id": str(run_id),
                         "result_kind": "general_response",
+                        "conversation_title": result.get("conversation_title"),
+                        "presentation": result.get("presentation"),
                     },
                 },
             )

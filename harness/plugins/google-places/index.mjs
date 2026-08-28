@@ -1,4 +1,5 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { rememberSessionPlaces } from "../shared/session-places.mjs";
 
 const DEFAULT_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const DEFAULT_MAX_RESULTS = 8;
@@ -15,6 +16,7 @@ const FIELD_MASK = [
   "places.userRatingCount",
   "places.priceLevel",
   "places.currentOpeningHours.openNow",
+  "places.photos",
 ].join(",");
 
 export const name = "tripforge-google-places";
@@ -108,6 +110,17 @@ export function createGooglePlacesSearchTool({
                 user_rating_count: { type: "integer" },
                 price_level: { type: "string" },
                 open_now: { type: "boolean" },
+                photo: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    name: { type: "string", required: true },
+                    width_px: { type: "integer" },
+                    height_px: { type: "integer" },
+                    author_name: { type: "string" },
+                    author_uri: { type: "string" },
+                  },
+                },
               },
             },
           },
@@ -168,6 +181,10 @@ export function createGooglePlacesSearchTool({
       const places = Array.isArray(payload?.places)
         ? payload.places.slice(0, request.maxResultCount).flatMap(normalizePlace)
         : [];
+      rememberSessionPlaces(
+        exec.agent?.session?.id ?? process.env.TRIPFORGE_DSH_SESSION_ID,
+        places,
+      );
       return { query: args.query.trim(), places };
     },
   });
@@ -208,6 +225,7 @@ function normalizePlace(value) {
   const latitude = finiteNumber(value.location?.latitude);
   const longitude = finiteNumber(value.location?.longitude);
   const rating = finiteNumber(value.rating);
+  const photo = normalizePhoto(value.photos?.[0]);
   return [{
     place_id: placeId,
     name: placeName,
@@ -233,7 +251,30 @@ function normalizePlace(value) {
     ...(typeof value.currentOpeningHours?.openNow === "boolean"
       ? { open_now: value.currentOpeningHours.openNow }
       : {}),
+    ...(photo ? { photo } : {}),
   }];
+}
+
+function normalizePhoto(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const name = boundedString(value.name, 1000);
+  if (!/^places\/[^/]+\/photos\/[^/]+$/u.test(name)) return undefined;
+  const author = Array.isArray(value.authorAttributions)
+    ? value.authorAttributions.find((item) => item && typeof item === "object")
+    : undefined;
+  return {
+    name,
+    ...(Number.isInteger(value.widthPx) && value.widthPx > 0
+      ? { width_px: value.widthPx }
+      : {}),
+    ...(Number.isInteger(value.heightPx) && value.heightPx > 0
+      ? { height_px: value.heightPx }
+      : {}),
+    ...(boundedString(author?.displayName, 160)
+      ? { author_name: boundedString(author.displayName, 160) }
+      : {}),
+    ...(safeAttributionUrl(author?.uri) ? { author_uri: author.uri } : {}),
+  };
 }
 
 function renderForModel(query, places) {
@@ -302,6 +343,16 @@ function safeMapsUrl(value) {
       || url.hostname === "www.google.com"
       || url.hostname.endsWith(".google.com")
     );
+  } catch {
+    return false;
+  }
+}
+
+function safeAttributionUrl(value) {
+  if (typeof value !== "string" || value.length > 2000) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:";
   } catch {
     return false;
   }

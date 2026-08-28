@@ -2,7 +2,7 @@
 
 This directory is the independently deployable agent runtime for TripForge.
 FastAPI remains the product API and system of record; this service owns agent
-orchestration, tool execution, session continuation, and agent-runtime events.
+orchestration, tool execution, transient model context, and agent-runtime events.
 
 DeepSeek Harness is currently in developer preview. Keep all DeepSeek-specific
 APIs behind adapters in this directory so breaking upstream changes do not leak
@@ -43,7 +43,7 @@ The harness owns:
 - DeepSeek Harness configuration and plugins
 - multi-agent delegation and concurrency
 - model context, prompts, skills, and tool selection
-- durable runtime session identifiers and resumable execution
+- ephemeral per-run DSH execution and deterministic correlation identifiers
 - raw runtime events, which are translated before leaving FastAPI
 
 Shared deterministic domain logic should remain in FastAPI or move into a
@@ -164,12 +164,19 @@ This is the continuation point for `feature/deepseek-harness`.
 - [x] Added schema-v1 headless clarification output with normalization in Harness and a
   second validation boundary in FastAPI.
 - [x] Added a flexible frontend question renderer for select, multi-select, text,
-  textarea, location, number, date, and boolean fields.
+  textarea, location, number, date, date-range, and boolean fields.
 - [x] Preserved the FastAPI/SSE pause-and-resume flow using `parent_run_id`; Harness
   credentials and provider keys never reach the browser.
 - [x] Added the `tripforge-progress` plugin and runtime framing for sanitized
   agent, answer-preparation, and `tool.started`, `tool.completed`, and `tool.failed`
   lifecycle events. Private reasoning and raw model output are never published.
+- [x] Streamed throttled model phases and bounded latency/token metrics from native
+  DSH session events while explicitly discarding reasoning-delta text.
+- [x] Added the `submit_trip_response` terminal tool and a private result frame so
+  a validated structured response ends the turn without waiting for a lingering
+  Headless process or requiring another model-formatting pass.
+- [x] Compacted model input to authoritative planning fields and at most four useful,
+  non-duplicate conversation turns; browser/run identifiers never enter the prompt.
 - [x] Added the versioned public activity contract at the FastAPI boundary with an
   event allowlist, bounded fields, secret redaction, and fail-closed handling for
   unknown Harness event types.
@@ -184,6 +191,32 @@ This is the continuation point for `feature/deepseek-harness`.
   Harness result boundary and frontend, while retaining numeric controls for one count.
 - [x] Made clarification answers authoritative in the headless continuation prompt so
   completed fields are not requested again.
+- [x] Made Supabase the durable conversation source: FastAPI reloads trusted message
+  context and merges persisted clarification answers/draft before every Harness turn.
+- [x] Moved production DSH transcripts and plugin patches into a temporary per-run
+  directory that is removed after completion instead of accumulating in the repository.
+- [x] Added a local fast-intake path for incomplete trip and hotel requests so the
+  question form appears without waiting for a full model turn.
+- [x] Made structured answers such as date ranges JSON-safe at the Supabase boundary;
+  failed pre-run submissions now preserve the form without adding duplicate messages.
+- [x] Compacted live planning activity to one current row per agent while preserving
+  request milestones and paired provider tool calls.
+- [x] Added grounded hotel-selection guidance so the model can offer 3–5 Google Places
+  matches as an interactive single-choice question before continuing the plan.
+- [x] Retained a five-minute absolute run limit and made the provider answer budget
+  configurable; the default NVIDIA Kimi K3 profile now uses low reasoning effort and
+  a 4,096-token response cap for faster interactive turns.
+  Silent model generation is not treated as provider inactivity.
+- [x] Added scenario-aware fast intake that omits questions already answered in the
+  message or persisted trip draft and avoids asking lodging questions unnecessarily.
+- [x] Added a bounded structured presentation contract for compact trip answers, plus
+  grounded hotel-choice cards with Google rating, address, Maps links, and photo metadata.
+- [x] Added backend-generated, same-origin photo URLs so the browser renders hotel media
+  without receiving a Google API key or calling Google Places directly.
+- [x] Normalized enriched hotel choices to lossless JSON before returning the terminal
+  tool result, omitting absent optional provider fields instead of emitting `undefined`.
+- [x] Added a provider-wide rate-limit cooldown that stops repeated `429` requests and
+  returns a safe wait-and-retry message while preserving submitted trip details.
 - [x] Added the typed, read-only `search_google_places` plugin with bounded requests,
   fixed-host enforcement, cancellation, normalized provider IDs, and native Harness
   inspector presentation metadata.
@@ -196,15 +229,15 @@ This is the continuation point for `feature/deepseek-harness`.
 - [x] Added the local Inspector launcher using DeepSeek Harness Web and its native
   Trajectory viewer with the same patch, tools, model, and read-only permissions as
   production.
-- [x] Isolated Inspector runtime/session files from the service and bound the Web profile
-  to `127.0.0.1` only.
+- [x] Isolated Inspector runtime/session files in an OS temporary directory, remove them
+  on normal Inspector exit, and bind the Web profile to `127.0.0.1` only.
 - [x] Replaced Windows `.cmd` child launching with the pinned DSH JavaScript entrypoint
   through Node, avoiding `spawn EINVAL` without enabling a command shell.
 - [x] Added a generated local-plugin patch with literal module URLs and a separate
   Inspector-only patch for the browser services excluded from production Headless.
 - [x] Added plugin activation reporting to Harness `/health`.
-- [x] Added mocked Google provider, plugin-registration, progress-contract, HTTP, and
-  Windows launcher tests. The Harness suite currently passes 28 tests; the Next.js
+- [x] Added mocked Google provider, plugin-registration, persistence, progress-contract,
+  HTTP, and Windows launcher tests. The Harness suite currently passes 49 tests; the Next.js
   production build and ESLint also passed during this checkpoint.
 - [x] Verified the custom composition loads in both pinned Headless and Web profiles
   without making a model call.
@@ -213,12 +246,9 @@ This is the continuation point for `feature/deepseek-harness`.
 
 - [ ] Run a live `search_google_places` prompt with a restricted Google key and inspect
   the resulting model/tool behavior. Unit tests currently use mocked responses only.
-- [ ] Implement durable Harness session continuation. Clarification currently resumes at
-  the TripForge/FastAPI contract level, but the CLI adapter does not yet invoke native
-  `dsh --resume` session continuation.
 - [ ] Restore the full legacy LangGraph backend test suite on this Windows host. The
-  Python 3.12 environment is repaired and the 11 Harness/runtime-manager tests pass,
-  but Windows Application Control still blocks LangGraph's native `uuid_utils` DLL.
+  Python 3.12 environment is repaired, but six legacy local-planner/API assertions are
+  currently out of sync with the newer clarification behavior.
 
 ### Not started
 
@@ -240,17 +270,20 @@ This is the continuation point for `feature/deepseek-harness`.
 ### Recommended next session
 
 1. Recreate the backend virtual environment and run all Python tests.
-2. Perform one live, read-only Google Places prompt in Inspector and review Trajectory.
-3. Implement `tripvlog-properties` with the same typed-tool and mocked-provider pattern.
-4. Add versioned hotel/plan result contracts before introducing specialized agents.
+2. Browser-check the compact trip response and grounded hotel-choice cards with a live,
+   read-only Google Places prompt.
+3. Implement `tripvlog-properties` for live price and availability data using the same
+   typed-tool and mocked-provider pattern.
+4. Expand the structured presentation contract into the versioned full `TripPlan` result.
 
-Before committing, keep `harness/.env`, `backend/.env`, `.dsh-runtime/`, and
-`.workspaces/` untracked, and rotate any API key that has appeared in chat or screenshots.
+Before committing, keep `harness/.env` and `backend/.env` untracked, and rotate any API
+key that has appeared in chat or screenshots. Legacy `.dsh-*` and `.workspaces*`
+directories remain ignored until they are manually removed.
 
 ### Active TripForge plugin policy
 
 `config/tripforge.patch.yml` is applied to every headless run. It retains the core
-model/agent/session loop, credentials, JSONL persistence, retry and timeout policy,
+model/agent/session loop, credentials, transient JSONL persistence, retry and timeout policy,
 token metering, compaction, checkpoints, spill handling, sandbox/permissions, and
 spawn-based subagents.
 
@@ -269,7 +302,7 @@ Implement them in this order:
 | --- | --- | --- | --- |
 | 1 | `tripforge-contracts` | Validate question, hotel, itinerary, source, and progress event schemas | Question/progress boundary implemented; hotel/plan contracts remain |
 | 2 | `tripforge-progress` | Publish safe agent/tool lifecycle events to the NDJSON stream | Agent, answer-preparation, and tool lifecycle implemented; hidden reasoning is intentionally excluded |
-| 3 | `google-places` | Text search, place details, ratings, and stable place IDs | Implemented read-only; photo retrieval remains |
+| 3 | `google-places` | Text search, place details, ratings, stable place IDs, and photo references | Implemented read-only; photos are served through the authenticated backend proxy |
 | 4 | `google-routes` | Route order, durations, distances, legs, and geometry | Implemented read-only; keep compatibility math deterministic |
 | 5 | `tripvlog-properties` | Hotel identity enrichment, offers, availability, rooms, reviews, and media | Read-only until approval infrastructure exists |
 | 6 | `tripforge-decisions` | Scope, compatibility ranking, itinerary assignment, budget calculation, and validation | Model ranks; deterministic code enforces constraints |
@@ -288,28 +321,48 @@ $env:HARNESS_SERVICE_TOKEN="local-development-token"
 npm.cmd start
 ```
 
-### Configure the OpenCode Zen model
+### Configure the NVIDIA NIM model
 
-TripForge registers OpenCode Zen through DSH's generic OpenAI-compatible adapter;
-it does not send Zen credentials through the `deepseek-official` provider route.
-The current environment variable names are retained for compatibility:
+TripForge registers NVIDIA NIM through DSH's generic OpenAI-compatible adapter.
+The API key stays in the server-side Harness environment and is never sent to the
+browser or FastAPI clients:
 
 ```dotenv
-DEEPSEEK_API_KEY=replace-with-a-new-zen-key
-DEEPSEEK_BASE_URL=https://opencode.ai/zen/v1
-DSH_MODEL=nemotron-3.5-lightning-free
+NVIDIA_API_KEY=replace-with-a-new-nvidia-key
+NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
+DSH_MODEL=moonshotai/kimi-k3
+DSH_REASONING_EFFORT=low
 DSH_CONTEXT_WINDOW_TOKENS=65536
 DSH_MAX_OUTPUT_TOKENS=4096
+HARNESS_RUN_TIMEOUT_MS=300000
+HARNESS_RATE_LIMIT_COOLDOWN_MS=60000
 ```
 
-The context bound keeps long sessions from growing without limit, while the output cap
-is large enough for a multi-day itinerary but far below the adapter's former 32K default.
+`NVIDIA_NIM_KEY` is also accepted as a temporary alias for existing local environments.
+The context bound keeps long sessions from growing without limit. The lower reasoning
+effort and output cap prioritize first-response latency for interactive trip planning.
 The supervisor asks for all relevant missing trip or hotel details in one clarification
 pass and avoids provider searches until those requirements are complete.
 
-Use a model ID returned by `GET /zen/v1/models`. Provider documentation can briefly
-lead the live catalog: on 2026-08-26 Zen rejected `x-preview-f-free` as unsupported,
-while `nemotron-3.5-lightning-free` is the current TripForge model.
+Kimi K3 is configured with OpenAI-compatible streaming, tool calling, and low reasoning
+effort. The adapter preserves reasoning metadata internally across tool-call
+turns as required by the model, while the public TripForge event stream continues to
+publish only safe progress summaries rather than private reasoning text.
+
+### Conversation and run identity
+
+Supabase is the durable conversation source. Before an existing conversation starts a
+new run, FastAPI loads its latest trusted messages and merges saved clarification answers
+and draft facts into the Harness request. DSH receives that compact context in a fresh
+temporary session; its raw internal transcript is deleted after the run. This prevents
+confirmed facts from being requested again without storing private runtime events in the
+product database.
+
+A new `run_id` is still generated for every submitted message. Runs are execution
+attempts used for status, SSE events, retries, errors, and audit history; they are not
+conversation identities. The stable `conversation_id` is what links those runs, and the
+Harness derives a stable private correlation ID from it, but does not use that identifier
+as durable local storage.
 
 ### Enable the Google provider plugins
 
@@ -348,17 +401,17 @@ npm.cmd run inspect
 
 It opens `http://127.0.0.1:8091` by default. Use `npm.cmd run inspect:no-open` when
 you want the URL printed without opening a browser. The launcher inherits provider
-configuration from `harness/.env` but starts DSH inside `.inspector-workspace`, which
-avoids the DSH restriction on launcher-owned settings such as `DEEPSEEK_BASE_URL` in
-the current working directory's `.env`. It also applies
+configuration from `harness/.env` but keeps DSH session logs under the OS temporary
+directory by default. The selected Inspector workspace remains the tool context only. It also applies
 `config/tripforge.inspector.patch.yml` to restore only the browser-facing services
 required by Web; the production Headless runtime does not load that override.
 
 Open a conversation, send a travel prompt, then select the **Trajectory** view to inspect
 turns, steps, tool/subtool calls, sanitized inputs and outputs, duration, timing, and
 token usage. This is observable execution telemetry, not private chain-of-thought.
-Inspector sessions live under `.dsh-inspector/`; both Inspector directories are ignored
-by Git and are separate from the production Headless session directory.
+Inspector sessions are intentionally disposable and are removed when Inspector exits
+normally. Set `HARNESS_INSPECTOR_EPHEMERAL=false` only when local Inspector history is
+explicitly needed; the configured `DSH_INSPECTOR_HOME` is used in that mode.
 
 ## Migration plan
 
@@ -378,7 +431,8 @@ Exit condition: the current test suite passes through the runtime interface.
 1. Pin a tested DeepSeek Harness package/commit.
 2. Add the local service, configuration validation, health endpoint, and structured
    logging under this directory.
-3. Implement session start, event streaming, snapshot, resume, and cancellation.
+3. Implement per-run session start, Supabase context reconstruction, event streaming,
+   snapshots, and cancellation.
 4. Add a fake runtime so backend and harness contract tests do not require a model.
 
 Exit condition: FastAPI can start a fake harness run and replay its events.

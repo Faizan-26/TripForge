@@ -68,6 +68,39 @@ def test_harness_unknown_progress_type_falls_back_without_forwarding_private_dat
     assert update.data == {"activity_schema_version": "1"}
 
 
+def test_harness_model_metrics_are_bounded_and_forwarded() -> None:
+    update = _parse_update(
+        json.dumps(
+            {
+                "kind": "progress",
+                "type": "agent.completed",
+                "agent": "supervisor",
+                "message": "Travel model completed",
+                "data": {
+                    "phase": "model_completed",
+                    "duration_ms": 12500,
+                    "first_token_ms": 800,
+                    "input_tokens": 1200,
+                    "output_tokens": 320,
+                    "reasoning_tokens": 110,
+                    "private_reasoning": "must not cross the boundary",
+                },
+            }
+        )
+    )
+
+    assert isinstance(update, RuntimeProgress)
+    assert update.data == {
+        "activity_schema_version": "1",
+        "phase": "model_completed",
+        "duration_ms": 12500,
+        "first_token_ms": 800,
+        "input_tokens": 1200,
+        "output_tokens": 320,
+        "reasoning_tokens": 110,
+    }
+
+
 def test_harness_completed_update_maps_to_runtime_contract() -> None:
     update = _parse_update(
         json.dumps({"kind": "completed", "state": {"general_result": {"message": "ok"}}})

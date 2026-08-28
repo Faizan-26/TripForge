@@ -18,6 +18,7 @@ import {
   type ConversationSummary,
   type HotelPropertyCandidate,
   type HotelSearchResult,
+  type GeneralAssistantResult,
   type RunEvent,
   type RunStatus,
   type SelectedHotelContext,
@@ -28,13 +29,14 @@ export type ThreadMessage = {
   id: string;
   role: "traveler" | "assistant";
   content: string;
-  artifact?: TripPlan | ClarificationResult | HotelSearchResult;
+  artifact?: TripPlan | ClarificationResult | HotelSearchResult | GeneralAssistantResult;
   activity?: RunEvent[];
   activityStatus?: RunStatus;
 };
 
 type StartRunOptions = {
   answers?: Record<string, AnswerValue>;
+  draft?: Record<string, unknown>;
   parentRunId?: string;
   intent?: "GENERAL" | "FULL_TRIP_PLAN" | "HOTEL_SEARCH";
   selectedHotel?: SelectedHotelContext;
@@ -65,6 +67,7 @@ function hydrateConversation(detail?: ConversationDetail) {
     selectedHotel: undefined,
     error: "",
     events: [] as RunEvent[],
+    knownAnswers: {} as Record<string, AnswerValue>,
   };
   const artifacts = new Map(
     detail.artifacts
@@ -82,6 +85,14 @@ function hydrateConversation(detail?: ConversationDetail) {
     ?? detail.artifacts.at(-1);
   const latestRun = detail.runs.at(-1);
   const latestPayload = latestArtifact?.payload;
+  const knownAnswers = detail.messages.reduce<Record<string, AnswerValue>>(
+    (all, message) => {
+      const answers = message.metadata.answers;
+      if (!answers || typeof answers !== "object" || Array.isArray(answers)) return all;
+      return { ...all, ...(answers as Record<string, AnswerValue>) };
+    },
+    {},
+  );
 
   return {
     messages: detail.messages
@@ -90,6 +101,16 @@ function hydrateConversation(detail?: ConversationDetail) {
         const answers = message.metadata.answers;
         const runId = typeof message.metadata.run_id === "string" ? message.metadata.run_id : undefined;
         const artifact = runId ? artifacts.get(runId) : undefined;
+        const storedGeneral = message.role === "assistant"
+          ? {
+              intent: "GENERAL",
+              message: message.content,
+              conversation_title: typeof message.metadata.conversation_title === "string"
+                ? message.metadata.conversation_title
+                : "Travel response",
+              presentation: message.metadata.presentation,
+            }
+          : undefined;
         return {
           id: message.public_id,
           role: message.role === "user" ? "traveler" : "assistant",
@@ -102,6 +123,10 @@ function hydrateConversation(detail?: ConversationDetail) {
               ? artifact
               : isClarificationResult(artifact)
                 ? artifact
+                : isGeneralAssistantResult(artifact)
+                  ? artifact
+                  : isGeneralAssistantResult(storedGeneral)
+                    ? storedGeneral
                 : undefined,
           activity: runId ? eventsByRun.get(runId) : undefined,
           activityStatus: runId ? statusByRun.get(runId) : undefined,
@@ -120,6 +145,7 @@ function hydrateConversation(detail?: ConversationDetail) {
     events: latestRun?.status === "failed"
       ? eventsByRun.get(latestRun.id) ?? []
       : [],
+    knownAnswers,
   };
 }
 
@@ -139,6 +165,7 @@ export function useTripPlanner(
   const [plan, setPlan] = useState<TripPlan | undefined>(initial.plan);
   const [hotelResult, setHotelResult] = useState<HotelSearchResult | undefined>(initial.hotelResult);
   const [selectedHotel, setSelectedHotel] = useState<SelectedHotelContext | undefined>(initial.selectedHotel);
+  const [knownAnswers, setKnownAnswers] = useState<Record<string, AnswerValue>>(initial.knownAnswers);
   const [error, setError] = useState(initial.error);
   const [conversations, setConversations] = useState<ConversationSummary[]>(initialConversations);
 
@@ -148,6 +175,8 @@ export function useTripPlanner(
     async (message: string, options: StartRunOptions = {}) => {
       abortRef.current?.abort();
       const controller = new AbortController();
+      const optimisticMessageId = id();
+      let runCreated = false;
       abortRef.current = controller;
       setError("");
       if (!options.parentRunId) setClarification(undefined);
@@ -160,7 +189,7 @@ export function useTripPlanner(
         setPrompt(message);
         setMessages((current) => [
           ...current,
-          { id: id(), role: "traveler", content: message },
+          { id: optimisticMessageId, role: "traveler", content: message },
         ]);
       } else {
         if (options.intent === "FULL_TRIP_PLAN" && options.selectedHotel) {
@@ -169,7 +198,7 @@ export function useTripPlanner(
         setMessages((current) => [
           ...current,
           {
-            id: id(),
+            id: optimisticMessageId,
             role: "traveler",
             content: options.followUpLabel ?? "I’ve added the missing trip details.",
           },
@@ -189,6 +218,7 @@ export function useTripPlanner(
             client_request_id: id(),
             client_message_id: id(),
             answers: options.answers,
+            draft: options.draft,
             parent_run_id: options.parentRunId,
             intent: options.intent,
             selected_hotel: options.selectedHotel,
@@ -196,6 +226,7 @@ export function useTripPlanner(
           },
           controller.signal,
         );
+        runCreated = true;
         setClarification(undefined);
         setConversationId(created.conversation_id);
         window.history.replaceState(null, "", `/chat/${created.conversation_id}`);
@@ -245,7 +276,14 @@ export function useTripPlanner(
           const result = snapshot.result;
           setMessages((current) => [
             ...current,
-            { id: id(), role: "assistant", content: result.message, activity, activityStatus: snapshot.status },
+            {
+              id: id(),
+              role: "assistant",
+              content: result.message,
+              artifact: result,
+              activity,
+              activityStatus: snapshot.status,
+            },
           ]);
         } else if (isClarificationResult(snapshot.result)) {
           setClarification(snapshot.result);
@@ -289,6 +327,9 @@ export function useTripPlanner(
         if (!snapshot.error) setEvents([]);
       } catch (caught) {
         if (controller.signal.aborted) return;
+        if (!runCreated) {
+          setMessages((current) => current.filter((item) => item.id !== optimisticMessageId));
+        }
         setStatus("failed");
         setError(userFacingTripError(caught));
       }
@@ -299,14 +340,17 @@ export function useTripPlanner(
   const answerClarification = useCallback(
     (answers: Record<string, AnswerValue>) => {
       if (!runId || !prompt) return Promise.resolve();
+      const cumulativeAnswers = { ...knownAnswers, ...answers };
+      setKnownAnswers(cumulativeAnswers);
       return startRun(prompt, {
-        answers,
+        answers: cumulativeAnswers,
+        draft: clarification?.draft ?? undefined,
         parentRunId: runId,
         intent: selectedHotel ? "FULL_TRIP_PLAN" : undefined,
         selectedHotel,
       });
     },
-    [prompt, runId, selectedHotel, startRun],
+    [clarification, knownAnswers, prompt, runId, selectedHotel, startRun],
   );
 
   const selectHotelAndPlan = useCallback(
@@ -358,6 +402,7 @@ export function useTripPlanner(
     setPlan(undefined);
     setHotelResult(undefined);
     setSelectedHotel(undefined);
+    setKnownAnswers({});
     setError("");
   }, []);
 

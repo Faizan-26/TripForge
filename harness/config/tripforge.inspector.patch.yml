@@ -12,11 +12,16 @@
     path: ':memory:'
     openAt: never
 
-# The shipped Web `standard` preset is a coding-agent composition and expects
-# registries intentionally removed by TripForge. Without a preset roster, DSH
-# creates Web sessions from the shared TripForge host composition, which owns
-# our travel tools. Hide the selector because there is no alternate preset.
+# Web sessions require a mounted agent preset. Expose only TripForge's empty
+# agent-plane overlay so sessions inherit the host's travel prompt and tools
+# without enabling the shipped coding-agent presets.
 - id: agent-presets
-  disabled: true
+  disabled: false
+  config:
+    default: tripforge
+    roots:
+      - path: !!js process.env.TRIPFORGE_AGENT_PRESET_ROOT
+        trust: system
+    includeUserRoot: false
 - id: ui-agent-preset
-  disabled: true
+  disabled: false

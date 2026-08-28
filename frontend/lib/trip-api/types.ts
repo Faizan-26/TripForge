@@ -5,7 +5,12 @@ export type RunStatus =
   | "completed"
   | "failed";
 
-export type AnswerValue = string | number | boolean | string[];
+export type DateRangeAnswer = {
+  start_date: string;
+  end_date: string;
+};
+
+export type AnswerValue = string | number | boolean | string[] | DateRangeAnswer;
 
 export type PlanTripRequest = {
   message: string;
@@ -14,6 +19,7 @@ export type PlanTripRequest = {
   client_message_id?: string;
   title?: string;
   answers?: Record<string, AnswerValue>;
+  draft?: Record<string, unknown>;
   parent_run_id?: string;
   intent?: "GENERAL" | "FULL_TRIP_PLAN" | "HOTEL_SEARCH";
   selected_hotel?: SelectedHotelContext;
@@ -29,6 +35,35 @@ export type GeneralAssistantResult = {
   intent: "GENERAL";
   message: string;
   conversation_title: string;
+  presentation?: TravelPresentation | null;
+};
+
+export type TravelPresentationFact = {
+  label: string;
+  value: string;
+};
+
+export type TravelPresentationItem = {
+  title: string;
+  time?: string | null;
+  description?: string | null;
+  location?: string | null;
+  maps_url?: string | null;
+};
+
+export type TravelPresentationSection = {
+  title: string;
+  subtitle?: string | null;
+  items: TravelPresentationItem[];
+};
+
+export type TravelPresentation = {
+  kind: "trip_plan" | "travel_answer" | "hotel_advice";
+  title: string;
+  summary?: string | null;
+  facts: TravelPresentationFact[];
+  sections: TravelPresentationSection[];
+  notes: string[];
 };
 
 export type CreateRunResponse = {
@@ -43,6 +78,16 @@ export type ClarificationOption = {
   value: string;
   label: string;
   description?: string | null;
+  place_id?: string | null;
+  address?: string | null;
+  rating?: number | null;
+  review_count?: number | null;
+  maps_url?: string | null;
+  price_level?: string | null;
+  image_url?: string | null;
+  image_alt?: string | null;
+  image_attribution?: string | null;
+  image_attribution_url?: string | null;
 };
 
 export type ClarificationQuestion = {
@@ -56,6 +101,7 @@ export type ClarificationQuestion = {
     | "location"
     | "number"
     | "date"
+    | "date_range"
     | "boolean";
   required: boolean;
   options: ClarificationOption[];
@@ -452,7 +498,7 @@ export function isClarificationResult(value: unknown): value is ClarificationRes
   if ("ui_schema_version" in value && value.ui_schema_version !== "1") return false;
   if (!Array.isArray(value.questions) || value.questions.length === 0) return false;
   const kinds = new Set([
-    "single_select", "multi_select", "text", "textarea", "location", "number", "date", "boolean",
+    "single_select", "multi_select", "text", "textarea", "location", "number", "date", "date_range", "boolean",
   ]);
   return value.questions.every((question: unknown) => {
     if (!question || typeof question !== "object") return false;
@@ -499,6 +545,24 @@ export function isGeneralAssistantResult(value: unknown): value is GeneralAssist
     && "intent" in value
     && value.intent === "GENERAL"
     && "message" in value
-    && typeof value.message === "string",
+    && typeof value.message === "string"
+    && (!("presentation" in value) || value.presentation == null || isTravelPresentation(value.presentation)),
+  );
+}
+
+function isTravelPresentation(value: unknown): value is TravelPresentation {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "kind" in value
+    && ["trip_plan", "travel_answer", "hotel_advice"].includes(String(value.kind))
+    && "title" in value
+    && typeof value.title === "string"
+    && "facts" in value
+    && Array.isArray(value.facts)
+    && "sections" in value
+    && Array.isArray(value.sections)
+    && "notes" in value
+    && Array.isArray(value.notes),
   );
 }

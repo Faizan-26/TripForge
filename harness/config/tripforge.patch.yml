@@ -4,33 +4,44 @@
 
 - id: agent-default-model
   config:
-    provider: opencode-zen
-    model: !!js process.env.DSH_MODEL ?? 'nemotron-3.5-lightning-free'
+    provider: nvidia-nim
+    model: !!js process.env.DSH_MODEL ?? 'moonshotai/kimi-k3'
 
-# OpenCode Zen is an OpenAI-compatible gateway, not the official DeepSeek API.
-# Keep credentials as environment references; no literal key enters composition.
+# NVIDIA NIM exposes an OpenAI-compatible streaming endpoint. The legacy
+# NVIDIA_NIM_KEY name is accepted locally while NVIDIA_API_KEY is the standard.
+# No literal credential enters the composition.
 - id: llm-deepseek
   disabled: true
 - id: llm-pi-ai
   disabled: false
   config:
     providers:
-      opencode-zen:
-        displayName: OpenCode Zen
-        apiKeyEnv: DEEPSEEK_API_KEY
+      nvidia-nim:
+        displayName: NVIDIA NIM
+        apiKeyEnv: !!js process.env.NVIDIA_API_KEY && 'NVIDIA_API_KEY' || 'NVIDIA_NIM_KEY'
         api: openai-completions
-        baseURL: !!js process.env.DEEPSEEK_BASE_URL ?? 'https://opencode.ai/zen/v1'
+        baseURL: !!js process.env.NVIDIA_NIM_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
         defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW_TOKENS ?? 65536)
         defaultMaxTokens: !!js Number(process.env.DSH_MAX_OUTPUT_TOKENS ?? 4096)
+        reasoning: !!js process.env.DSH_REASONING_EFFORT ?? 'low'
         compat:
-          thinkingFormat: deepseek
+          thinkingFormat: openai
+          supportsReasoningEffort: true
           supportsDeveloperRole: false
+          requiresReasoningContentOnAssistantMessages: true
+          supportsStrictMode: false
           maxTokensField: max_tokens
         models:
-          - id: !!js process.env.DSH_MODEL ?? 'nemotron-3.5-lightning-free'
-            name: TripForge configured model
+          - id: !!js process.env.DSH_MODEL ?? 'moonshotai/kimi-k3'
+            name: Kimi K3 on NVIDIA NIM
             contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW_TOKENS ?? 65536)
             maxTokens: !!js Number(process.env.DSH_MAX_OUTPUT_TOKENS ?? 4096)
+            input:
+              - text
+            reasoningEfforts:
+              low: low
+              high: high
+              max: max
 
 # Extra model calls and interactive/browser-only facilities.
 - id: session-title

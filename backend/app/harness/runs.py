@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from app.runtime.base import AgentRuntime, RuntimeCompleted
 from app.schemas.events import RunEvent, RunSnapshot, RunStatus
-from app.schemas.trip import ClarificationQuestion, PlanTripRequest
+from app.schemas.trip import ClarificationQuestion, GeneralAssistantResult, PlanTripRequest
 from app.supabase import TripRepository
 
 logger = logging.getLogger(__name__)
@@ -302,7 +302,9 @@ class InMemoryRunManager:
                     terminal_status=RunStatus.COMPLETED,
                 )
             elif final_state.get("general_result"):
-                record.result = _jsonable(final_state["general_result"])
+                record.result = GeneralAssistantResult.model_validate(
+                    _jsonable(final_state["general_result"])
+                ).model_dump(mode="json")
                 if self._repository:
                     await self._repository.save_result(
                         conversation_id=record.conversation_id,
