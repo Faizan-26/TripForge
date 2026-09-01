@@ -1,8 +1,11 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import fs from "node:fs";
 import {
   clearSessionPlaces,
   enrichHotelSelection,
+  sessionPlaceEvidence,
 } from "../shared/session-places.mjs";
+import { workflowResponseViolation } from "../../src/workflow.mjs";
 
 const MAX_RESULT_BYTES = 512_000;
 const terminalResponses = new Map();
@@ -23,7 +26,7 @@ export function apply(ctx) {
   ctx.tools.register(createTripResultTool());
 }
 
-export function createTripResultTool() {
+export function createTripResultTool({ workflowContext } = {}) {
   return defineTool({
     name: "submit_trip_response",
     description:
@@ -39,6 +42,28 @@ export function createTripResultTool() {
         type: "string",
         enum: ["clarification", "general"],
         description: "Whether this turn asks questions or returns a final message.",
+      },
+      mode: {
+        type: "string",
+        enum: ["GENERAL_TRAVEL", "PLACES_SEARCH", "FULL_TRIP_PLAN", "OUT_OF_SCOPE"],
+        description: "The semantic TripForge mode selected for this conversation turn.",
+      },
+      workflow_update: {
+        type: "object",
+        additionalProperties: false,
+        description: "Semantic facts used by the deterministic workflow controller.",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["GENERAL_TRAVEL", "PLACES_SEARCH", "FULL_TRIP_PLAN", "OUT_OF_SCOPE"],
+          },
+          locale: { type: "string" },
+          requirements_complete: { type: "boolean" },
+          requirements_complete_after_answers: { type: "boolean" },
+          lodging_required: { type: "boolean" },
+          historical_places_required: { type: "boolean" },
+          historical_places_grounded: { type: "boolean" },
+        },
       },
       message: { type: "string", description: "Required for a general response." },
       presentation: {
@@ -77,10 +102,28 @@ export function createTripResultTool() {
         exec.agent?.session?.id ?? process.env.TRIPFORGE_DSH_SESSION_ID ?? "",
       );
       if (!sessionId) throw new Error("TripForge terminal response has no session identity");
-      const response = toLosslessJson(enrichHotelSelection(
+      const enriched = toLosslessJson(enrichHotelSelection(
         validateTerminalResponse(args.response ?? directResponse(args)),
         sessionId,
       ));
+      const evidence = sessionPlaceEvidence(sessionId);
+      const response = evidence.historical_places_grounded
+        ? {
+            ...enriched,
+            workflow_update: {
+              ...(enriched.workflow_update ?? {}),
+              historical_places_grounded: true,
+            },
+          }
+        : enriched;
+      const violation = workflowResponseViolation({
+        context: workflowContext ?? loadWorkflowContext(),
+        response,
+        evidence,
+      });
+      if (violation) {
+        throw new Error(`TripForge workflow ${violation.code}: ${violation.message}`);
+      }
       const output = JSON.stringify(response);
       if (Buffer.byteLength(output, "utf8") > MAX_RESULT_BYTES) {
         throw new Error("TripForge response exceeds the terminal result limit");
@@ -91,6 +134,17 @@ export function createTripResultTool() {
       return response;
     },
   });
+}
+
+function loadWorkflowContext() {
+  const file = process.env.TRIPFORGE_WORKFLOW_CONTEXT_PATH;
+  if (!file) return undefined;
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function toLosslessJson(value) {

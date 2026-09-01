@@ -3,16 +3,31 @@ const MAX_SESSIONS = 100;
 const MAX_PLACES_PER_SESSION = 20;
 
 export function rememberSessionPlaces(sessionId, places) {
+  return rememberSessionPlaceSearch(sessionId, undefined, places);
+}
+
+export function rememberSessionPlaceSearch(sessionId, searchType, places) {
   const key = String(sessionId ?? "");
   if (!key || !Array.isArray(places)) return;
-  const previous = placesBySession.get(key) ?? new Map();
+  const previous = placesBySession.get(key) ?? {
+    all: new Map(),
+    hotel: new Map(),
+    historical_place: new Map(),
+    searches: new Set(),
+  };
+  const typed = searchType === "hotel" || searchType === "historical_place"
+    ? previous[searchType]
+    : undefined;
   for (const place of places) {
     if (!place || typeof place.place_id !== "string") continue;
-    previous.set(place.place_id, place);
-    if (previous.size > MAX_PLACES_PER_SESSION) {
-      previous.delete(previous.keys().next().value);
+    previous.all.set(place.place_id, place);
+    typed?.set(place.place_id, place);
+    if (previous.all.size > MAX_PLACES_PER_SESSION) {
+      previous.all.delete(previous.all.keys().next().value);
     }
+    if (typed && typed.size > MAX_PLACES_PER_SESSION) typed.delete(typed.keys().next().value);
   }
+  if (typed && places.length > 0) previous.searches.add(searchType);
   placesBySession.delete(key);
   placesBySession.set(key, previous);
   while (placesBySession.size > MAX_SESSIONS) {
@@ -24,8 +39,9 @@ export function enrichHotelSelection(response, sessionId) {
   if (response?.outcome !== "clarification" || !Array.isArray(response.questions)) {
     return response;
   }
-  const places = placesBySession.get(String(sessionId));
-  if (!places) return response;
+  const stored = placesBySession.get(String(sessionId));
+  if (!stored) return response;
+  const places = stored.hotel.size > 0 ? stored.hotel : stored.all;
   return {
     ...response,
     questions: response.questions.map((question) => {
@@ -56,6 +72,18 @@ export function enrichHotelSelection(response, sessionId) {
         }),
       };
     }),
+  };
+}
+
+export function sessionPlaceEvidence(sessionId) {
+  const stored = placesBySession.get(String(sessionId));
+  return {
+    hotel_search_grounded: Boolean(
+      stored?.searches.has("hotel") && stored.hotel.size > 0,
+    ),
+    historical_places_grounded: Boolean(
+      stored?.searches.has("historical_place") && stored.historical_place.size > 0,
+    ),
   };
 }
 

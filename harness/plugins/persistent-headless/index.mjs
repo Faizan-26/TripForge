@@ -6,6 +6,15 @@ import { SessionId } from "@deepseek-ai/dsh-session";
 import { consumeTerminalResponse } from "../trip-result/index.mjs";
 import { formatResultLine } from "../progress/index.mjs";
 
+const TERMINAL_RECOVERY_PROMPT = [
+  "Your previous turn ended before a valid TripForge terminal response was submitted.",
+  "A deterministic workflow rule may have rejected the previous submit call.",
+  "Follow that tool error and the workflow next_action. Do not repeat answered questions.",
+  "Use the already available request and context, keep the user's language, and call",
+  "submit_trip_response exactly once now. If details are missing, submit 1 to 4 concise",
+  "clarification questions and preserve all facts already known in draft.",
+].join(" ");
+
 export const name = "tripforge-persistent-headless";
 export const inject = [
   "agentDefaultModel",
@@ -69,15 +78,38 @@ async function run(ctx, io) {
   await agent.whenIdle();
   await sessions.flush(agent.session);
 
-  const outcome = summarize(agent.session.events, firstSeq);
-  const submittedResponse = consumeTerminalResponse(sessionId);
+  let outcome = summarize(agent.session.events, firstSeq);
+  let submittedResponse = consumeTerminalResponse(sessionId);
+  if (shouldRetryTerminalResponse(submittedResponse, outcome)) {
+    io.stderr.write(
+      `dsh: TERMINAL_RECOVERY: ${outcome.reason?.kind ?? "missing-turn-end"}; retrying once\n`,
+    );
+    agent.followup(createUserMessage({
+      content: [{ type: "text", text: TERMINAL_RECOVERY_PROMPT }],
+      source: { kind: "user" },
+    }));
+    await agent.whenIdle();
+    await sessions.flush(agent.session);
+    outcome = summarize(agent.session.events, firstSeq);
+    submittedResponse = consumeTerminalResponse(sessionId);
+  }
   const terminalOutput = selectTerminalOutput(submittedResponse, outcome);
   if (terminalOutput) io.stderr.write(formatResultLine(terminalOutput));
   io.stdout.write(`${outcome.text}\n`);
   if (outcome.reason?.kind === "error") {
     io.stderr.write(`dsh: ${outcome.reason.error.code}: ${outcome.reason.error.message}\n`);
+  } else if (!terminalOutput) {
+    io.stderr.write(
+      `dsh: TERMINAL_RESPONSE_MISSING: turn ended with ${outcome.reason?.kind ?? "no reason"}\n`,
+    );
   }
   io.exit(outcome.reason?.kind === "completed" && terminalOutput ? 0 : 1);
+}
+
+export function shouldRetryTerminalResponse(submittedResponse, outcome) {
+  if (submittedResponse) return false;
+  if (outcome?.reason?.kind === "max-tokens") return true;
+  return outcome?.reason?.kind === "completed";
 }
 
 export function selectTerminalOutput(submittedResponse, outcome) {

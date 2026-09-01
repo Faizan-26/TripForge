@@ -101,6 +101,33 @@ def test_harness_model_metrics_are_bounded_and_forwarded() -> None:
     }
 
 
+def test_harness_forwards_safe_workflow_stage_without_private_reasoning() -> None:
+    update = _parse_update(
+        json.dumps(
+            {
+                "kind": "progress",
+                "type": "agent.progress",
+                "agent": "workflow",
+                "message": "Preparing grounded hotel choices",
+                "data": {
+                    "phase": "workflow",
+                    "goal": "hotel_selection",
+                    "goal_status": "in_progress",
+                    "reasoning": "private chain of thought",
+                },
+            }
+        )
+    )
+
+    assert isinstance(update, RuntimeProgress)
+    assert update.data == {
+        "activity_schema_version": "1",
+        "phase": "workflow",
+        "goal": "hotel_selection",
+        "goal_status": "in_progress",
+    }
+
+
 def test_harness_completed_update_maps_to_runtime_contract() -> None:
     update = _parse_update(
         json.dumps({"kind": "completed", "state": {"general_result": {"message": "ok"}}})

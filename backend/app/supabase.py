@@ -9,7 +9,7 @@ import httpx
 
 from app.core.config import Settings
 from app.schemas.events import RunEvent, RunSnapshot
-from app.schemas.trip import ConversationTurn, PlanTripRequest
+from app.schemas.trip import ConversationTurn, PlanTripRequest, TripWorkflowState
 
 
 class AuthenticationError(Exception):
@@ -159,7 +159,9 @@ class SupabaseGateway:
                 "content": request.message,
                 "client_message_id": str(request.client_message_id or uuid4()),
                 "metadata": {
-                    **request.model_dump(mode="json", include={"answers", "draft"}),
+                    **request.model_dump(
+                        mode="json", include={"answers", "draft", "workflow"}
+                    ),
                 },
             },
         )
@@ -206,6 +208,7 @@ class SupabaseGateway:
         context = []
         stored_answers: dict[str, Any] = {}
         stored_draft: dict[str, Any] = {}
+        stored_workflow: dict[str, Any] | None = None
         for row in reversed(rows if isinstance(rows, list) else []):
             role = row.get("role")
             content = row.get("content")
@@ -220,9 +223,14 @@ class SupabaseGateway:
             draft = metadata.get("draft")
             if isinstance(draft, dict):
                 stored_draft.update(draft)
+            workflow = metadata.get("workflow")
+            if isinstance(workflow, dict):
+                stored_workflow = workflow
         request.context = [ConversationTurn.model_validate(turn) for turn in context[-12:]]
         request.answers = {**stored_answers, **request.answers}
         request.draft = {**stored_draft, **request.draft}
+        if request.workflow is None and stored_workflow is not None:
+            request.workflow = TripWorkflowState.model_validate(stored_workflow)
 
     async def update_run(self, run_id: UUID, **values: Any) -> None:
         await self._request(
@@ -274,6 +282,7 @@ class SupabaseGateway:
                         "result_kind": "general_response",
                         "conversation_title": result.get("conversation_title"),
                         "presentation": result.get("presentation"),
+                        "workflow": result.get("workflow"),
                     },
                 },
             )
@@ -351,7 +360,11 @@ class SupabaseGateway:
                     if is_hotel_search
                     else "Your trip plan is ready."
                 ),
-                "metadata": {"run_id": str(run_id), "artifact_kind": kind},
+                "metadata": {
+                    "run_id": str(run_id),
+                    "artifact_kind": kind,
+                    "workflow": result.get("workflow"),
+                },
             },
         )
         await self._request(

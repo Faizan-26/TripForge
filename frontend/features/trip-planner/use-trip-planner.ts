@@ -14,6 +14,7 @@ import {
   isTripPlan,
   type AnswerValue,
   type ClarificationResult,
+  type ClarificationQuestion,
   type ConversationDetail,
   type ConversationSummary,
   type HotelPropertyCandidate,
@@ -23,6 +24,7 @@ import {
   type RunStatus,
   type SelectedHotelContext,
   type TripPlan,
+  type TripWorkflowState,
 } from "@/lib/trip-api/types";
 
 export type ThreadMessage = {
@@ -37,6 +39,7 @@ export type ThreadMessage = {
 type StartRunOptions = {
   answers?: Record<string, AnswerValue>;
   draft?: Record<string, unknown>;
+  workflow?: TripWorkflowState;
   parentRunId?: string;
   intent?: "GENERAL" | "FULL_TRIP_PLAN" | "HOTEL_SEARCH";
   selectedHotel?: SelectedHotelContext;
@@ -45,6 +48,87 @@ type StartRunOptions = {
 
 function id() {
   return crypto.randomUUID();
+}
+
+const ANSWER_LABELS: Record<string, string> = {
+  origin: "From",
+  source: "From",
+  destination: "Destination",
+  exact_dates: "Dates",
+  travel_dates: "Dates",
+  dates: "Dates",
+  duration: "Trip length",
+  travel_duration: "Trip length",
+  traveler_breakdown: "Travelers",
+  traveler_composition: "Travelers",
+  travelers: "Travelers",
+  adults: "Adults",
+  children: "Children",
+  budget: "Budget",
+  budget_total: "Budget",
+  max_total_price: "Budget",
+  interests: "Interests",
+  preferred_pace: "Pace",
+  pace: "Pace",
+  lodging_style: "Stay",
+  accommodation: "Stay",
+  constraints: "Preferences",
+  preferences: "Preferences",
+  travel_mode: "Transport",
+  transport: "Transport",
+  hotel_location: "Hotel area",
+  hotel_selection: "Hotel",
+  selected_hotel: "Hotel",
+};
+
+function answerLabel(key: string) {
+  const normalized = key.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (ANSWER_LABELS[normalized]) return ANSWER_LABELS[normalized];
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return value;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(date.valueOf())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function formatAnswerValue(value: AnswerValue, question?: ClarificationQuestion) {
+  const optionLabels = new Map(question?.options.map((option) => [option.value, option.label]) ?? []);
+  if (Array.isArray(value)) {
+    return value.map((item) => optionLabels.get(item) ?? item).join(", ");
+  }
+  if (typeof value === "object") {
+    return `${formatDate(value.start_date)} – ${formatDate(value.end_date)}`;
+  }
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  const text = String(value);
+  return (optionLabels.get(text) ?? text).trim().slice(0, 220);
+}
+
+function formatAnswerSummary(
+  answers: Record<string, AnswerValue>,
+  questions: ClarificationQuestion[] = [],
+) {
+  const questionById = new Map(questions.map((question) => [question.id, question]));
+  const lines = Object.entries(answers)
+    .map(([key, value]) => {
+      const formatted = formatAnswerValue(value, questionById.get(key));
+      return formatted ? `${answerLabel(key)}: ${formatted}` : "";
+    })
+    .filter(Boolean);
+  return lines.length ? `Trip details added:\n${lines.join("\n")}` : "Trip details added.";
 }
 
 function selectedHotelFromClarification(
@@ -115,7 +199,9 @@ function hydrateConversation(detail?: ConversationDetail) {
           id: message.public_id,
           role: message.role === "user" ? "traveler" : "assistant",
           content: message.role === "user" && answers && typeof answers === "object" && Object.keys(answers).length
-            ? "I’ve added the missing trip details."
+            ? message.content.startsWith("Trip details added:")
+              ? message.content
+              : formatAnswerSummary(answers as Record<string, AnswerValue>)
             : message.content,
           artifact: isTripPlan(artifact)
             ? artifact
@@ -200,7 +286,7 @@ export function useTripPlanner(
           {
             id: optimisticMessageId,
             role: "traveler",
-            content: options.followUpLabel ?? "I’ve added the missing trip details.",
+            content: options.followUpLabel ?? "Trip details added.",
           },
         ]);
       }
@@ -219,6 +305,7 @@ export function useTripPlanner(
             client_message_id: id(),
             answers: options.answers,
             draft: options.draft,
+            workflow: options.workflow,
             parent_run_id: options.parentRunId,
             intent: options.intent,
             selected_hotel: options.selectedHotel,
@@ -341,13 +428,16 @@ export function useTripPlanner(
     (answers: Record<string, AnswerValue>) => {
       if (!runId || !prompt) return Promise.resolve();
       const cumulativeAnswers = { ...knownAnswers, ...answers };
+      const answerSummary = formatAnswerSummary(answers, clarification?.questions);
       setKnownAnswers(cumulativeAnswers);
-      return startRun(prompt, {
+      return startRun(answerSummary, {
         answers: cumulativeAnswers,
         draft: clarification?.draft ?? undefined,
+        workflow: clarification?.workflow ?? undefined,
         parentRunId: runId,
         intent: selectedHotel ? "FULL_TRIP_PLAN" : undefined,
         selectedHotel,
+        followUpLabel: answerSummary,
       });
     },
     [clarification, knownAnswers, prompt, runId, selectedHotel, startRun],

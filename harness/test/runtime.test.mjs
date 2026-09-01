@@ -13,9 +13,12 @@ import {
   sessionIdFor,
   ProviderRateLimitError,
 } from "../src/runtime.mjs";
-import { formatProgressLine, formatResultLine } from "../plugins/progress/index.mjs";
+import {
+  formatProgressLine,
+  formatResultLine,
+  isPublicActivityTool,
+} from "../plugins/progress/index.mjs";
 import { renderPluginPatch } from "../src/plugin-patch.mjs";
-import { buildFastIntake } from "../src/intake.mjs";
 import { createServer, validateExecuteRequest } from "../src/server.mjs";
 
 test("Windows uses the cmd npx shim without a shell", () => {
@@ -265,54 +268,10 @@ test("travel date questions normalize to a date-range control", () => {
   assert.equal(state.clarifications[0].kind, "date_range");
 });
 
-test("incomplete trip requests use the fast local intake contract", () => {
-  const state = buildFastIntake({
-    run_id: "run-1",
-    conversation_id: "conversation-1",
-    message: "I'm planning a tour to Lahore",
-    payload: { answers: {} },
-  });
-  assert.equal(state.draft.destination, "Lahore");
-  assert.equal(state.harness.provider, "tripforge-intake");
-  assert.equal(state.clarifications.find((item) => item.id === "travel_dates").kind, "date_range");
-  assert.equal(state.clarifications.find((item) => item.id === "traveler_composition").kind, "text");
-});
-
-test("fast intake asks only facts missing from the travel scenario", () => {
-  const state = buildFastIntake({
-    run_id: "run-scenario",
-    conversation_id: "conversation-scenario",
-    message: "I'm in Sargodha and want a solo trip to Lahore for 3 days with food and a relaxed pace under PKR 20,000",
-    payload: { answers: {} },
-  });
-  const questionIds = state.clarifications.map((item) => item.id);
-  assert.equal(state.draft.destination, "Lahore");
-  assert.equal(state.draft.origin, "Sargodha");
-  assert.deepEqual(questionIds, ["constraints"]);
-});
-
-test("DeepSeek runtime completes incomplete intake without launching the provider", async () => {
-  const runtime = new DeepSeekCliRuntime({});
-  const updates = [];
-  for await (const update of runtime.execute({
-    run_id: "run-fast",
-    conversation_id: "conversation-1",
-    message: "Plan a trip to Lahore",
-    payload: { answers: {} },
-  })) updates.push(update);
-  assert.deepEqual(updates.map((item) => item.kind), ["progress", "progress", "completed"]);
-  assert.equal(updates.at(-1).state.harness.provider, "tripforge-intake");
-});
-
-test("follow-up answers bypass fast intake and continue to the model", () => {
-  const state = buildFastIntake({
-    run_id: "run-2",
-    conversation_id: "conversation-1",
-    parent_run_id: "run-1",
-    message: "I've added the missing trip details.",
-    payload: { answers: { budget: "PKR 150,000" } },
-  });
-  assert.equal(state, undefined);
+test("terminal response submission is internal rather than public activity", () => {
+  assert.equal(isPublicActivityTool("submit_trip_response"), false);
+  assert.equal(isPublicActivityTool("search_google_places"), true);
+  assert.equal(isPublicActivityTool("compute_google_route"), true);
 });
 
 test("UI schema accepts bounded travel fields and removes unknown presentation data", () => {

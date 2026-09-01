@@ -121,6 +121,8 @@ def _public_activity_data(event_type: str, value: Any) -> dict[str, Any]:
             "phase",
             "duration_ms",
             "first_token_ms",
+            "goal",
+            "goal_status",
         },
         "agent.completed": {
             "runtime",

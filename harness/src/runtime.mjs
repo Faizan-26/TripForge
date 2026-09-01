@@ -5,7 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { writePluginPatch } from "./plugin-patch.mjs";
 import { renderPrompt } from "./prompts.mjs";
-import { buildFastIntake } from "./intake.mjs";
+import {
+  isQuestionAnswered,
+  prepareWorkflowContext,
+  reduceWorkflow,
+} from "./workflow.mjs";
 
 export class ProviderRateLimitError extends Error {
   constructor(retryAfterMs) {
@@ -66,24 +70,13 @@ export class DeepSeekCliRuntime {
     process.stdout.write(`[harness] run ${request.run_id} starting\n`);
     const sessionId = sessionIdFor(request.conversation_id);
     const effectiveRequest = request;
+    const knownContext = compactTaskContext(effectiveRequest);
     yield progress("supervisor", "DeepSeek Harness is starting", {
       runtime: "deepseek",
       session_id: sessionId,
       conversation_id: request.conversation_id,
     }, "agent.started");
-
-    const intake = buildFastIntake(effectiveRequest);
-    if (intake) {
-      const persistentIntake = {
-        ...intake,
-        harness: { ...intake.harness, session_id: sessionId },
-      };
-      yield progress("supervisor", "Preparing a few quick choices", {
-        runtime: "tripforge-intake",
-      }, "answer.preparing");
-      yield completed(persistentIntake);
-      return;
-    }
+    yield workflowProgress(knownContext.workflow);
 
     const rateLimitRemainingMs = this.providerRateLimitedUntil - Date.now();
     if (rateLimitRemainingMs > 0) {
@@ -99,6 +92,11 @@ export class DeepSeekCliRuntime {
     );
     const pluginPatch = path.join(workspace, "tripforge.plugins.patch.yml");
     await writePluginPatch(pluginPatch, this.config);
+    const workflowContextPath = path.join(workspace, "tripforge.workflow-context.json");
+    await fs.writeFile(workflowContextPath, JSON.stringify(knownContext), {
+      encoding: "utf8",
+      flag: "wx",
+    });
     const task = buildTask(effectiveRequest, this.config.headlessTaskPrompt);
     const { command, args } = commandFor(
       { ...this.config, pluginPatch },
@@ -125,6 +123,7 @@ export class DeepSeekCliRuntime {
         DSH_HOME: dshHome,
         DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE ?? "read-only",
         TRIPFORGE_DSH_SESSION_ID: sessionId,
+        TRIPFORGE_WORKFLOW_CONTEXT_PATH: workflowContextPath,
       },
       timeoutMs: this.config.timeoutMs,
       maxOutputBytes: this.config.maxOutputBytes,
@@ -183,8 +182,9 @@ export class DeepSeekCliRuntime {
     const finalState = parseHarnessResult(
       output,
       sessionId,
-      compactTaskContext(effectiveRequest),
+      knownContext,
     );
+    yield workflowProgress(finalState.workflow);
     yield completed(finalState);
     } finally {
       await fs.rm(workspace, {
@@ -240,7 +240,7 @@ export function compactTaskContext(request) {
         return [{ role: turn.role, content: content.slice(0, 1000) }];
       }).slice(-4)
     : [];
-  return {
+  const compact = {
     ...(isRecord(payload.answers) && Object.keys(payload.answers).length > 0
       ? { answers: payload.answers }
       : {}),
@@ -253,6 +253,35 @@ export function compactTaskContext(request) {
       : {}),
     ...(context.length > 0 ? { recent_context: context } : {}),
   };
+  return {
+    ...compact,
+    workflow: prepareWorkflowContext({
+      ...compact,
+      workflow: payload.workflow,
+    }),
+  };
+}
+
+function workflowProgress(workflow) {
+  const goal = typeof workflow?.current_goal === "string"
+    ? workflow.current_goal
+    : "request_understanding";
+  const status = typeof workflow?.goals?.[goal] === "string"
+    ? workflow.goals[goal]
+    : "in_progress";
+  const messages = {
+    request_understanding: "Understanding the travel request",
+    trip_requirements: "Collecting the trip requirements",
+    hotel_selection: "Preparing grounded hotel choices",
+    historical_places: "Researching historical places",
+    itinerary: "Building the grounded itinerary",
+    complete: "Planning workflow completed",
+  };
+  return progress("workflow", messages[goal] ?? "Advancing the planning workflow", {
+    phase: "workflow",
+    goal,
+    goal_status: status,
+  });
 }
 
 export function parseHarnessResult(output, sessionId, knownContext = {}) {
@@ -260,6 +289,10 @@ export function parseHarnessResult(output, sessionId, knownContext = {}) {
   const value = parseStructuredOutput(text);
   if (value === undefined) {
     const title = "DeepSeek trip planning session";
+    const workflow = reduceWorkflow({
+      context: knownContext,
+      result: { outcome: "general", mode: "GENERAL_TRAVEL" },
+    });
     return withMetadata(
       {
         general_result: {
@@ -268,6 +301,7 @@ export function parseHarnessResult(output, sessionId, knownContext = {}) {
           conversation_title: title,
         },
         conversation_title: title,
+        workflow,
       },
       sessionId,
     );
@@ -279,7 +313,7 @@ export function parseHarnessResult(output, sessionId, knownContext = {}) {
       ...(isRecord(value.draft) ? value.draft : {}),
     };
     const questions = normalizeQuestions(value.questions)
-      .filter((question) => !questionAlreadyAnswered(
+      .filter((question) => !isQuestionAnswered(
         question.id,
         isRecord(knownContext.answers) ? knownContext.answers : {},
         draft,
@@ -289,12 +323,14 @@ export function parseHarnessResult(output, sessionId, knownContext = {}) {
         "DeepSeek Harness returned clarification without valid questions; all were invalid or previously answered",
       );
     }
+    const workflow = reduceWorkflow({ context: knownContext, result: value, questions });
     return withMetadata(
       {
         draft,
         clarifications: questions,
         ui_schema_version: "1",
         conversation_title: value.conversation_title,
+        workflow,
       },
       sessionId,
     );
@@ -302,6 +338,10 @@ export function parseHarnessResult(output, sessionId, knownContext = {}) {
   if (value?.outcome === "general" && typeof value.message === "string") {
     const title = value.conversation_title || "DeepSeek trip planning session";
     const presentation = normalizePresentation(value.presentation);
+    const workflow = reduceWorkflow({
+      context: knownContext,
+      result: { ...value, ...(presentation ? { presentation } : {}) },
+    });
     return withMetadata(
       {
         general_result: {
@@ -311,6 +351,7 @@ export function parseHarnessResult(output, sessionId, knownContext = {}) {
           ...(presentation ? { presentation } : {}),
         },
         conversation_title: title,
+        workflow,
       },
       sessionId,
     );
@@ -569,69 +610,6 @@ function safeHttpsUrl(value, googleOnly = false) {
   } catch {
     return false;
   }
-}
-
-const answerAliases = [
-  ["origin", "source", "departure", "departure_location"],
-  ["destination", "destinations", "hotel_location", "location"],
-  ["travel_dates", "trip_dates", "stay_dates", "date_range", "check_in", "check_out"],
-  [
-    "traveler_composition",
-    "guest_composition",
-    "travelers",
-    "guests",
-    "adults",
-    "children",
-  ],
-  ["budget", "budget_total", "hotel_budget", "max_total_price"],
-  ["interests", "activities"],
-  ["preferred_pace", "pace"],
-  ["lodging_style", "accommodation_style"],
-  ["constraints", "preferences", "transport_preferences"],
-  ["rooms", "room_count"],
-  ["hotel_must_haves", "must_haves"],
-  ["hotel_selection", "selected_hotel"],
-];
-
-function questionAlreadyAnswered(questionId, answers, draft) {
-  const aliases = answerAliases.find((group) => group.includes(questionId)) ?? [questionId];
-  if (aliases.some((alias) => Object.hasOwn(answers, alias))) return true;
-  if (aliases.includes("origin")) return hasText(draft.origin);
-  if (aliases.includes("destination")) {
-    return hasText(draft.destination)
-      || hasText(draft.hotel_search?.destination_query)
-      || isRecord(draft.hotel_search?.location);
-  }
-  if (aliases.includes("travel_dates")) {
-    return (hasText(draft.start_date) && hasText(draft.end_date))
-      || Number.isFinite(draft.duration_days)
-      || (hasText(draft.hotel_search?.check_in) && hasText(draft.hotel_search?.check_out));
-  }
-  if (aliases.includes("traveler_composition")) {
-    return Number.isFinite(draft.travelers)
-      || Number.isFinite(draft.hotel_search?.adults);
-  }
-  if (aliases.includes("budget")) {
-    return Number.isFinite(draft.budget_total)
-      || Number.isFinite(draft.hotel_search?.max_total_price);
-  }
-  if (aliases.includes("interests")) return nonEmptyArray(draft.interests);
-  if (aliases.includes("preferred_pace")) return hasText(draft.pace);
-  if (aliases.includes("constraints")) return nonEmptyArray(draft.preferences);
-  if (aliases.includes("rooms")) return Number.isFinite(draft.hotel_search?.rooms);
-  if (aliases.includes("hotel_must_haves")) {
-    return nonEmptyArray(draft.hotel_search?.amenities);
-  }
-  if (aliases.includes("hotel_selection")) return isRecord(draft.selected_hotel);
-  return false;
-}
-
-function hasText(value) {
-  return typeof value === "string" && Boolean(value.trim());
-}
-
-function nonEmptyArray(value) {
-  return Array.isArray(value) && value.length > 0;
 }
 
 function travelerCompositionKind(id, prompt, kind) {

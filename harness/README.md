@@ -195,24 +195,28 @@ This is the continuation point for `feature/deepseek-harness`.
   context and merges persisted clarification answers/draft before every Harness turn.
 - [x] Moved production DSH transcripts and plugin patches into a temporary per-run
   directory that is removed after completion instead of accumulating in the repository.
-- [x] Added a local fast-intake path for incomplete trip and hotel requests so the
-  question form appears without waiting for a full model turn.
+- [x] Replaced the English rule-based fast intake with model-driven multilingual
+  understanding so questions adapt to the user's language, wording, region, and scenario.
 - [x] Made structured answers such as date ranges JSON-safe at the Supabase boundary;
   failed pre-run submissions now preserve the form without adding duplicate messages.
 - [x] Compacted live planning activity to one current row per agent while preserving
   request milestones and paired provider tool calls.
 - [x] Added grounded hotel-selection guidance so the model can offer 3–5 Google Places
   matches as an interactive single-choice question before continuing the plan.
-- [x] Retained a five-minute absolute run limit and made the provider answer budget
-  configurable; the default NVIDIA Kimi K3 profile now uses low reasoning effort and
-  a 4,096-token response cap for faster interactive turns.
-  Silent model generation is not treated as provider inactivity.
-- [x] Added scenario-aware fast intake that omits questions already answered in the
-  message or persisted trip draft and avoids asking lodging questions unnecessarily.
+- [x] Added a bounded absolute run limit and provider answer budget; the Mistral
+  Medium 3.5 profile uses low reasoning with an 8,192-token response cap.
+  A turn that reaches the token ceiling before submitting its terminal response gets
+  one concise recovery attempt instead of failing silently.
+- [x] Added dynamic multi-round intake that preserves confirmed facts, asks only the
+  next high-value missing details, and avoids repeating questions across turns.
 - [x] Added a bounded structured presentation contract for compact trip answers, plus
   grounded hotel-choice cards with Google rating, address, Maps links, and photo metadata.
 - [x] Added backend-generated, same-origin photo URLs so the browser renders hotel media
   without receiving a Google API key or calling Google Places directly.
+- [x] Restricted the assistant to general travel guidance, hotel or historical-place
+  search, and full trip planning, with multilingual semantic scope classification.
+- [x] Kept the internal `submit_trip_response` terminal call out of public activity
+  events and frontend source-check counts.
 - [x] Normalized enriched hotel choices to lossless JSON before returning the terminal
   tool result, omitting absent optional provider fields instead of emitting `undefined`.
 - [x] Added a provider-wide rate-limit cooldown that stops repeated `429` requests and
@@ -321,33 +325,45 @@ $env:HARNESS_SERVICE_TOKEN="local-development-token"
 npm.cmd start
 ```
 
-### Configure the NVIDIA NIM model
+### Configure the Mistral model
 
-TripForge registers NVIDIA NIM through DSH's generic OpenAI-compatible adapter.
+TripForge registers Mistral through the native adapter shipped in DSH's pi-ai
+catalog. This preserves structured thinking chunks across tool-result turns.
 The API key stays in the server-side Harness environment and is never sent to the
 browser or FastAPI clients:
 
 ```dotenv
-NVIDIA_API_KEY=replace-with-a-new-nvidia-key
-NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
-DSH_MODEL=moonshotai/kimi-k3
+MISTRAL_API_KEY=replace-with-a-new-mistral-key
+DSH_MODEL=mistral-medium-3.5
 DSH_REASONING_EFFORT=low
-DSH_CONTEXT_WINDOW_TOKENS=65536
-DSH_MAX_OUTPUT_TOKENS=4096
-HARNESS_RUN_TIMEOUT_MS=300000
+DSH_CONTEXT_WINDOW_TOKENS=262144
+DSH_MAX_OUTPUT_TOKENS=8192
+DSH_PROVIDER_TIMEOUT_MS=60000
+DSH_PROVIDER_IDLE_TIMEOUT_MS=45000
+DSH_PROVIDER_MAX_RETRIES=1
+HARNESS_RUN_TIMEOUT_MS=180000
 HARNESS_RATE_LIMIT_COOLDOWN_MS=60000
 ```
 
-`NVIDIA_NIM_KEY` is also accepted as a temporary alias for existing local environments.
-The context bound keeps long sessions from growing without limit. The lower reasoning
-effort and output cap prioritize first-response latency for interactive trip planning.
-The supervisor asks for all relevant missing trip or hotel details in one clarification
-pass and avoids provider searches until those requirements are complete.
+For the current local cutover, a Mistral key stored under `NVIDIA_API_KEY` is also
+accepted. New deployments should use the correctly named `MISTRAL_API_KEY`.
+The context bound keeps long sessions from growing without limit. Low reasoning keeps
+clarification turns responsive, while the 8,192-token cap and provider deadlines keep
+each turn bounded and leave enough room for the model to submit its structured response.
+The installed pi-ai Mistral catalog does not provide an effort map for Medium 3.5, so
+TripForge explicitly maps its `low` profile to Mistral's `none` wire value. Without that
+override, the adapter silently falls back to `high` and can consume the complete response
+budget before calling the terminal response tool.
+Provider request, stream-idle, and retry bounds stop an unhealthy upstream stream before
+it consumes the complete Harness run budget.
+The supervisor asks the next relevant trip or hotel questions dynamically and avoids
+provider searches until the requirements needed for that result are complete.
 
-Kimi K3 is configured with OpenAI-compatible streaming, tool calling, and low reasoning
-effort. The adapter preserves reasoning metadata internally across tool-call
-turns as required by the model, while the public TripForge event stream continues to
-publish only safe progress summaries rather than private reasoning text.
+Mistral Medium 3.5 uses native Mistral streaming and function calling. The selected
+TripForge `low` profile explicitly disables provider reasoning so short interactive
+turns reliably reach the terminal tool. The native adapter still preserves any
+structured provider content required across tool-result turns. The public TripForge
+event stream publishes only safe progress summaries rather than private model text.
 
 ### Conversation and run identity
 

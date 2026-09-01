@@ -51,6 +51,57 @@ class ConversationTurn(APIModel):
     content: str = Field(min_length=1, max_length=6000)
 
 
+WorkflowMode = Literal[
+    "UNKNOWN",
+    "GENERAL_TRAVEL",
+    "PLACES_SEARCH",
+    "FULL_TRIP_PLAN",
+    "OUT_OF_SCOPE",
+]
+WorkflowGoal = Literal[
+    "request_understanding",
+    "trip_requirements",
+    "hotel_selection",
+    "historical_places",
+    "itinerary",
+    "complete",
+]
+WorkflowGoalStatus = Literal["pending", "in_progress", "completed", "skipped", "blocked"]
+WorkflowNextAction = Literal[
+    "classify_and_extract",
+    "ask_only_missing_requirements",
+    "ground_and_present_hotel_choices",
+    "ground_historical_places",
+    "compose_grounded_itinerary",
+    "respond_to_follow_up",
+]
+
+
+class TripWorkflowRequirements(APIModel):
+    lodging_required: bool | None = None
+    historical_places_required: bool | None = None
+    complete_after_current_answers: bool | None = None
+
+
+class TripWorkflowEvidence(APIModel):
+    hotel_candidates_grounded: bool = False
+    historical_places_grounded: bool = False
+
+
+class TripWorkflowState(APIModel):
+    version: Literal["1"] = "1"
+    mode: WorkflowMode = "UNKNOWN"
+    locale: str | None = Field(default=None, max_length=40)
+    turn: int = Field(default=0, ge=0, le=10_000)
+    current_goal: WorkflowGoal = "request_understanding"
+    goals: dict[WorkflowGoal, WorkflowGoalStatus]
+    requirements: TripWorkflowRequirements
+    evidence: TripWorkflowEvidence
+    answered_question_ids: list[str] = Field(default_factory=list, max_length=100)
+    last_question_ids: list[str] = Field(default_factory=list, max_length=12)
+    next_action: WorkflowNextAction = "classify_and_extract"
+
+
 class TravelPresentationFact(APIModel):
     label: str = Field(min_length=1, max_length=60)
     value: str = Field(min_length=1, max_length=180)
@@ -100,6 +151,7 @@ class PlanTripRequest(APIModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     answers: dict[str, AnswerValue] = Field(default_factory=dict)
     draft: dict[str, Any] = Field(default_factory=dict)
+    workflow: TripWorkflowState | None = None
     origin: LocationInput | None = None
     parent_run_id: UUID | None = None
     intent: Intent | None = None

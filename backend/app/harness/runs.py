@@ -228,6 +228,7 @@ class InMemoryRunManager:
                 record.result = {
                     "ui_schema_version": "1",
                     "draft": _jsonable(final_state.get("draft")),
+                    "workflow": _jsonable(final_state.get("workflow")),
                     "questions": questions,
                 }
                 if self._repository:
@@ -305,6 +306,8 @@ class InMemoryRunManager:
                 record.result = GeneralAssistantResult.model_validate(
                     _jsonable(final_state["general_result"])
                 ).model_dump(mode="json")
+                if final_state.get("workflow"):
+                    record.result["workflow"] = _jsonable(final_state["workflow"])
                 if self._repository:
                     await self._repository.save_result(
                         conversation_id=record.conversation_id,

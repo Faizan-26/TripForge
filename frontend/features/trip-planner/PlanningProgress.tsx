@@ -48,13 +48,17 @@ function stringData(event: RunEvent, key: string) {
   return typeof value === "string" ? value : undefined;
 }
 
+function isInternalToolEvent(event: RunEvent) {
+  return event.type.startsWith("tool.") && stringData(event, "tool") === "submit_trip_response";
+}
+
 function activityItems(events: RunEvent[]): ActivityItem[] {
   const result: ActivityItem[] = [];
   const tools = new Map<string, number>();
   const agents = new Map<string, number>();
 
   for (const event of events) {
-    if (!visibleTypes.has(event.type)) continue;
+    if (!visibleTypes.has(event.type) || isInternalToolEvent(event)) continue;
     if (event.type.startsWith("tool.")) {
       const callId = stringData(event, "call_id") ?? `${event.sequence}`;
       const existingIndex = tools.get(callId);
@@ -143,7 +147,9 @@ function formatDuration(milliseconds: number) {
 
 function totalToolTime(events: RunEvent[]) {
   return events.reduce((total, event) => (
-    event.type.startsWith("tool.") && typeof event.data.duration_ms === "number"
+    event.type.startsWith("tool.")
+      && !isInternalToolEvent(event)
+      && typeof event.data.duration_ms === "number"
       ? total + event.data.duration_ms
       : total
   ), 0);
@@ -171,10 +177,12 @@ export function PlanningProgress({ events, status }: { events: RunEvent[]; statu
 
   const toolCount = new Set(events.flatMap((event) => {
     const callId = stringData(event, "call_id");
-    return event.type.startsWith("tool.") && callId ? [callId] : [];
+    return event.type.startsWith("tool.") && !isInternalToolEvent(event) && callId ? [callId] : [];
   })).size;
   const duration = totalToolTime(events);
-  const latest = [...events].reverse().find((event) => visibleTypes.has(event.type))?.message
+  const latest = [...events].reverse().find((event) => (
+    visibleTypes.has(event.type) && !isInternalToolEvent(event)
+  ))?.message
     ?? "Planning your trip";
   const heading = busy ? "Planning your trip" : "How this response was built";
 
@@ -189,7 +197,11 @@ export function PlanningProgress({ events, status }: { events: RunEvent[]; statu
       >
         <span>
           <strong>{heading}</strong>
-          <small aria-live="polite">{busy ? latest : `${toolCount} tool ${toolCount === 1 ? "call" : "calls"}${duration ? ` · ${formatDuration(duration)}` : ""}`}</small>
+          <small aria-live="polite">{busy
+            ? latest
+            : toolCount > 0
+              ? `${toolCount} source ${toolCount === 1 ? "check" : "checks"}${duration ? ` · ${formatDuration(duration)}` : ""}`
+              : "No external lookups"}</small>
         </span>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
       </button>

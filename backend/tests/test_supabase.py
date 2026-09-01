@@ -94,6 +94,31 @@ async def test_existing_conversation_hydrates_harness_context_from_supabase() ->
                     "metadata": {
                         "answers": {"destination": "Lahore", "budget": "PKR 20000"},
                         "draft": {"destination": "Lahore", "pace": "relaxed"},
+                        "workflow": {
+                            "version": "1",
+                            "mode": "FULL_TRIP_PLAN",
+                            "turn": 2,
+                            "current_goal": "trip_requirements",
+                            "goals": {
+                                "request_understanding": "completed",
+                                "trip_requirements": "in_progress",
+                                "hotel_selection": "pending",
+                                "historical_places": "pending",
+                                "itinerary": "pending",
+                                "complete": "pending",
+                            },
+                            "requirements": {
+                                "lodging_required": True,
+                                "historical_places_required": True,
+                            },
+                            "evidence": {
+                                "hotel_candidates_grounded": False,
+                                "historical_places_grounded": False,
+                            },
+                            "answered_question_ids": ["destination"],
+                            "last_question_ids": ["origin"],
+                            "next_action": "ask_only_missing_requirements",
+                        },
                     },
                     "created_at": "2026-08-28T12:00:00Z",
                 },
@@ -138,6 +163,9 @@ async def test_existing_conversation_hydrates_harness_context_from_supabase() ->
         "pace": "relaxed",
         "selected_hotel_name": "Canal View Hotel",
     }
+    assert request.workflow is not None
+    assert request.workflow.mode == "FULL_TRIP_PLAN"
+    assert request.workflow.current_goal == "trip_requirements"
 
 
 async def test_supabase_rejects_invalid_access_token() -> None:

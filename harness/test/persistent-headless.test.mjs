@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   selectTerminalOutput,
+  shouldRetryTerminalResponse,
   summarize,
 } from "../plugins/persistent-headless/index.mjs";
 
@@ -39,4 +40,27 @@ test("persistent headless never publishes provider error text as a terminal resu
     text: "A completed response",
     reason: { kind: "completed" },
   }), "A completed response");
+});
+
+test("persistent headless retries only recoverable missing terminal responses", () => {
+  assert.equal(shouldRetryTerminalResponse(undefined, {
+    text: "",
+    reason: { kind: "max-tokens" },
+  }), true);
+  assert.equal(shouldRetryTerminalResponse(undefined, {
+    text: "",
+    reason: { kind: "completed" },
+  }), true);
+  assert.equal(shouldRetryTerminalResponse(undefined, {
+    text: "The submit call was rejected",
+    reason: { kind: "completed" },
+  }), true);
+  assert.equal(shouldRetryTerminalResponse(undefined, {
+    text: "provider failed",
+    reason: { kind: "error", error: { code: "SERVER" } },
+  }), false);
+  assert.equal(shouldRetryTerminalResponse('{"outcome":"clarification"}', {
+    text: "",
+    reason: { kind: "max-tokens" },
+  }), false);
 });

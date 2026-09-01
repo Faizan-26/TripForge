@@ -12,6 +12,48 @@ export type DateRangeAnswer = {
 
 export type AnswerValue = string | number | boolean | string[] | DateRangeAnswer;
 
+export type TripWorkflowMode =
+  | "UNKNOWN"
+  | "GENERAL_TRAVEL"
+  | "PLACES_SEARCH"
+  | "FULL_TRIP_PLAN"
+  | "OUT_OF_SCOPE";
+
+export type TripWorkflowGoal =
+  | "request_understanding"
+  | "trip_requirements"
+  | "hotel_selection"
+  | "historical_places"
+  | "itinerary"
+  | "complete";
+
+export type TripWorkflowState = {
+  version: "1";
+  mode: TripWorkflowMode;
+  locale?: string;
+  turn: number;
+  current_goal: TripWorkflowGoal;
+  goals: Record<TripWorkflowGoal, "pending" | "in_progress" | "completed" | "skipped" | "blocked">;
+  requirements: {
+    lodging_required?: boolean;
+    historical_places_required?: boolean;
+    complete_after_current_answers?: boolean;
+  };
+  evidence: {
+    hotel_candidates_grounded: boolean;
+    historical_places_grounded: boolean;
+  };
+  answered_question_ids: string[];
+  last_question_ids: string[];
+  next_action:
+    | "classify_and_extract"
+    | "ask_only_missing_requirements"
+    | "ground_and_present_hotel_choices"
+    | "ground_historical_places"
+    | "compose_grounded_itinerary"
+    | "respond_to_follow_up";
+};
+
 export type PlanTripRequest = {
   message: string;
   conversation_id?: string;
@@ -20,6 +62,7 @@ export type PlanTripRequest = {
   title?: string;
   answers?: Record<string, AnswerValue>;
   draft?: Record<string, unknown>;
+  workflow?: TripWorkflowState;
   parent_run_id?: string;
   intent?: "GENERAL" | "FULL_TRIP_PLAN" | "HOTEL_SEARCH";
   selected_hotel?: SelectedHotelContext;
@@ -118,6 +161,7 @@ export type ClarificationQuestion = {
 export type ClarificationResult = {
   ui_schema_version?: "1";
   draft?: Record<string, unknown> | null;
+  workflow?: TripWorkflowState | null;
   questions: ClarificationQuestion[];
 };
 

@@ -4,44 +4,40 @@
 
 - id: agent-default-model
   config:
-    provider: nvidia-nim
-    model: !!js process.env.DSH_MODEL ?? 'moonshotai/kimi-k3'
+    provider: mistral
+    model: !!js process.env.DSH_MODEL ?? 'mistral-medium-3.5'
 
-# NVIDIA NIM exposes an OpenAI-compatible streaming endpoint. The legacy
-# NVIDIA_NIM_KEY name is accepted locally while NVIDIA_API_KEY is the standard.
-# No literal credential enters the composition.
+# Reuse pi-ai's installed Mistral catalog and native SDK adapter. In particular,
+# do not set `api` or `baseURL` here: doing so replaces the native adapter with
+# generic OpenAI streaming, which cannot preserve Mistral thinking chunks across
+# a tool-result turn. No literal credential enters the composition.
 - id: llm-deepseek
   disabled: true
 - id: llm-pi-ai
   disabled: false
   config:
     providers:
-      nvidia-nim:
-        displayName: NVIDIA NIM
-        apiKeyEnv: !!js process.env.NVIDIA_API_KEY && 'NVIDIA_API_KEY' || 'NVIDIA_NIM_KEY'
-        api: openai-completions
-        baseURL: !!js process.env.NVIDIA_NIM_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
-        defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW_TOKENS ?? 65536)
-        defaultMaxTokens: !!js Number(process.env.DSH_MAX_OUTPUT_TOKENS ?? 4096)
+      mistral:
+        displayName: Mistral AI
+        apiKeyEnv: !!js process.env.MISTRAL_API_KEY && 'MISTRAL_API_KEY' || 'NVIDIA_API_KEY'
         reasoning: !!js process.env.DSH_REASONING_EFFORT ?? 'low'
-        compat:
-          thinkingFormat: openai
-          supportsReasoningEffort: true
-          supportsDeveloperRole: false
-          requiresReasoningContentOnAssistantMessages: true
-          supportsStrictMode: false
-          maxTokensField: max_tokens
-        models:
-          - id: !!js process.env.DSH_MODEL ?? 'moonshotai/kimi-k3'
-            name: Kimi K3 on NVIDIA NIM
-            contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW_TOKENS ?? 65536)
-            maxTokens: !!js Number(process.env.DSH_MAX_OUTPUT_TOKENS ?? 4096)
-            input:
-              - text
+        timeoutMs: !!js Number(process.env.DSH_PROVIDER_TIMEOUT_MS ?? 60000)
+        streamIdleTimeoutMs: !!js Number(process.env.DSH_PROVIDER_IDLE_TIMEOUT_MS ?? 45000)
+        retryPolicy:
+          mode: normal
+          maxRetries: !!js Number(process.env.DSH_PROVIDER_MAX_RETRIES ?? 1)
+          backoff:
+            initialDelayMs: 500
+            maxDelayMs: 3000
+            jitterRatio: 0.1
+        modelOverrides:
+          mistral-medium-3.5:
+            maxTokens: !!js Number(process.env.DSH_MAX_OUTPUT_TOKENS ?? 8192)
+            # The installed catalog lacks an effort map, which makes the adapter
+            # send `high` for every level. TripForge low must explicitly disable it.
             reasoningEfforts:
-              low: low
+              low: none
               high: high
-              max: max
 
 # Extra model calls and interactive/browser-only facilities.
 - id: session-title

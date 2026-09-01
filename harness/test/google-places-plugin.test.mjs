@@ -28,7 +28,10 @@ test("Google Places Cordis plugin registers one typed tool and prompt section", 
     else process.env.GOOGLE_MAPS_API_KEY = previous;
   }
   assert.equal(registered.name, "search_google_places");
-  assert.equal(registered.isConcurrencySafe({ query: "hotels in Kyoto" }), true);
+  assert.equal(registered.isConcurrencySafe({
+    query: "hotels in Kyoto",
+    search_type: "hotel",
+  }), true);
   assert.equal(section.name, "tool:search_google_places");
 });
 
@@ -67,6 +70,7 @@ test("Google Places plugin sends a bounded request and normalizes provider ident
 
   const result = await tool.execute({
     query: "boutique hotels in Kyoto",
+    search_type: "hotel",
     max_results: 3,
     location_bias: { latitude: 35, longitude: 135.7, radius_meters: 5000 },
   }, execution());
@@ -95,6 +99,7 @@ test("Google Places plugin sends a bounded request and normalizes provider ident
       author_uri: "https://example.com/photographer",
     },
   });
+  assert.equal(result.search_type, "hotel");
   assert.match(request.options.headers["x-goog-fieldmask"], /places\.photos/u);
 });
 
@@ -110,6 +115,7 @@ test("Google Places plugin rejects unsafe endpoints and invalid location bias", 
   await assert.rejects(
     tool.execute({
       query: "hotels",
+      search_type: "hotel",
       location_bias: { latitude: 100, longitude: 0, radius_meters: 1000 },
     }, execution()),
     /latitude/,
@@ -124,7 +130,7 @@ test("Google Places plugin returns a sanitized provider failure", async () => {
     }), { status: 403, headers: { "content-type": "application/json" } }),
   });
   await assert.rejects(
-    tool.execute({ query: "hotels in Kyoto" }, execution()),
+    tool.execute({ query: "hotels in Kyoto", search_type: "hotel" }, execution()),
     /HTTP 403: API key rejected/,
   );
 });

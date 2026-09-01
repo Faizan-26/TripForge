@@ -97,6 +97,7 @@ export function apply(ctx) {
   });
 
   ctx.on("tools/pre-execute", (exec, next) => {
+    if (!isPublicActivityTool(exec.name)) return next();
     startedAt.set(exec, performance.now());
     publish({
       type: "tool.started",
@@ -105,15 +106,14 @@ export function apply(ctx) {
       data: {
         tool: exec.name,
         call_id: String(exec.callId),
-        arguments: exec.name === "submit_trip_response"
-          ? { outcome: exec.arguments?.response?.outcome ?? exec.arguments?.outcome }
-          : sanitize(exec.arguments),
+        arguments: sanitize(exec.arguments),
       },
     });
     return next();
   }, { prepend: true });
 
   ctx.on("tools/result", (exec, result) => {
+    if (!isPublicActivityTool(exec.name)) return;
     const start = startedAt.get(exec);
     startedAt.delete(exec);
     const durationMs = start === undefined ? undefined : Math.max(0, performance.now() - start);
@@ -130,6 +130,10 @@ export function apply(ctx) {
       },
     });
   });
+}
+
+export function isPublicActivityTool(toolName) {
+  return toolName !== "submit_trip_response";
 }
 
 export function formatProgressLine(event) {
@@ -193,7 +197,6 @@ function toolMessage(tool, phase) {
   const labels = {
     search_google_places: "Google Places search",
     compute_google_route: "Google route calculation",
-    submit_trip_response: "Trip response",
   };
   const label = labels[tool] ?? tool.replaceAll("_", " ");
   return `${label} ${phase}`;

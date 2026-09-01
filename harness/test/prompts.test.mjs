@@ -11,7 +11,11 @@ test("headless task prompt renders request values without changing user text", (
     { message: "Plan {{literal}}", payload: { answers: { travelers: 2 } } },
     "Request: {{USER_MESSAGE}}\nContext: {{REQUEST_CONTEXT}}",
   );
-  assert.equal(result, 'Request: Plan {{literal}}\nContext: {"answers":{"travelers":2}}');
+  assert.match(result, /^Request: Plan \{\{literal\}\}\nContext: /u);
+  const context = JSON.parse(result.slice(result.indexOf("Context: ") + "Context: ".length));
+  assert.deepEqual(context.answers, { travelers: 2 });
+  assert.equal(context.workflow.version, "1");
+  assert.deepEqual(context.workflow.answered_question_ids, ["travelers"]);
 });
 
 test("headless context omits identifiers, duplicate messages, and unrelated payload fields", () => {
@@ -29,11 +33,15 @@ test("headless context omits identifiers, duplicate messages, and unrelated payl
       ],
     },
   });
-  assert.deepEqual(context, {
-    answers: { budget: "PKR 150,000" },
-    intent: "FULL_TRIP_PLAN",
-    recent_context: [{ role: "assistant", content: "A few choices will help." }],
-  });
+  assert.deepEqual(context.answers, { budget: "PKR 150,000" });
+  assert.equal(context.intent, "FULL_TRIP_PLAN");
+  assert.deepEqual(
+    context.recent_context,
+    [{ role: "assistant", content: "A few choices will help." }],
+  );
+  assert.equal(context.workflow.mode, "FULL_TRIP_PLAN");
+  assert.equal(context.workflow.current_goal, "trip_requirements");
+  assert.equal(context.workflow.next_action, "ask_only_missing_requirements");
 });
 
 test("prompt rendering rejects missing declared placeholders", () => {
@@ -43,7 +51,7 @@ test("prompt rendering rejects missing declared placeholders", () => {
   );
 });
 
-test("supervisor prompt is travel-only and collects complete planning inputs", () => {
+test("supervisor prompt enforces exactly three travel modes and complete planning inputs", () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const prompt = loadPromptFile(path.join(root, "prompts", "supervisor.md"));
   for (const requirement of [
@@ -54,6 +62,15 @@ test("supervisor prompt is travel-only and collects complete planning inputs", (
     "budget with currency",
     "hotel search",
     "Do not call tools until required details are complete",
+    "GENERAL_TRAVEL",
+    "PLACES_SEARCH",
+    "FULL_TRIP_PLAN",
+    "Search only for hotels or historical places",
+    "A greeting without a travel request is outside scope",
+    "any language",
+    "Do not use a fixed questionnaire",
+    "latest substantive user message",
+    "1 to 4 high-value questions",
   ]) {
     assert.match(prompt, new RegExp(requirement, "iu"));
   }

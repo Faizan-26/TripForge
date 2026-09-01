@@ -1,5 +1,5 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { rememberSessionPlaces } from "../shared/session-places.mjs";
+import { rememberSessionPlaceSearch } from "../shared/session-places.mjs";
 
 const DEFAULT_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const DEFAULT_MAX_RESULTS = 8;
@@ -35,10 +35,11 @@ export function apply(ctx, config = {}) {
     name: "tool:search_google_places",
     order: 105,
     text: [
-      "Use search_google_places for current hotels, stays, attractions, restaurants,",
-      "and destination anchors. Treat every returned place_id as the authoritative",
+      "Use search_google_places only for current hotels and historical places permitted",
+      "by the TripForge supervisor. Treat every returned place_id as the authoritative",
       "identity. Never invent places, ratings, addresses, coordinates, or Maps links.",
-      "Search calls are read-only and may run concurrently when independent.",
+      "Always set search_type to hotel or historical_place. Search calls are read-only",
+      "and may run concurrently when independent.",
     ].join(" "),
   });
   ctx.tools.register(createGooglePlacesSearchTool({ apiKey, maxResults, timeoutMs }));
@@ -62,13 +63,19 @@ export function createGooglePlacesSearchTool({
   return defineTool({
     name: "search_google_places",
     description:
-      "Search Google Places for real hotels, stays, attractions, restaurants, or destination anchors. " +
+      "Search Google Places for real hotels or historical places allowed by TripForge. " +
       "Returns stable Google place IDs and grounded place details.",
     parameters: {
       query: {
         type: "string",
         required: true,
         description: "A specific place-search query, for example 'boutique hotels in Kyoto'.",
+      },
+      search_type: {
+        type: "string",
+        required: true,
+        enum: ["hotel", "historical_place"],
+        description: "The permitted TripForge evidence category for this search.",
       },
       max_results: {
         type: "integer",
@@ -91,6 +98,7 @@ export function createGooglePlacesSearchTool({
         additionalProperties: false,
         properties: {
           query: { type: "string", required: true },
+          search_type: { type: "string", required: true },
           places: {
             type: "array",
             required: true,
@@ -156,6 +164,7 @@ export function createGooglePlacesSearchTool({
       };
     },
     async execute(args, exec) {
+      const searchType = normalizedSearchType(args.search_type);
       const request = buildSearchRequest(args, resultLimit);
       let response;
       try {
@@ -181,13 +190,19 @@ export function createGooglePlacesSearchTool({
       const places = Array.isArray(payload?.places)
         ? payload.places.slice(0, request.maxResultCount).flatMap(normalizePlace)
         : [];
-      rememberSessionPlaces(
+      rememberSessionPlaceSearch(
         exec.agent?.session?.id ?? process.env.TRIPFORGE_DSH_SESSION_ID,
+        searchType,
         places,
       );
-      return { query: args.query.trim(), places };
+      return { query: args.query.trim(), search_type: searchType, places };
     },
   });
+}
+
+function normalizedSearchType(value) {
+  if (value === "hotel" || value === "historical_place") return value;
+  throw new Error("search_type must be hotel or historical_place");
 }
 
 function buildSearchRequest(args, maxResults) {
