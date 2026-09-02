@@ -1,5 +1,8 @@
 # TripForge DeepSeek Harness
 
+For the implemented end-to-end architecture, plugin responsibilities, data flow,
+and design rationale, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
 This directory is the independently deployable agent runtime for TripForge.
 FastAPI remains the product API and system of record; this service owns agent
 orchestration, tool execution, transient model context, and agent-runtime events.

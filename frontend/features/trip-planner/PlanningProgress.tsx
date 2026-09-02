@@ -26,6 +26,16 @@ const agentLabels: Record<string, string> = {
   activity_research: "Place researcher",
   travel_research: "Travel researcher",
   compatibility_ranking: "Route reviewer",
+  workflow: "Planning stage",
+};
+
+const goalLabels: Record<string, string> = {
+  request_understanding: "Understanding your request",
+  trip_requirements: "Trip requirements",
+  hotel_selection: "Hotel selection",
+  historical_places: "Historical-place research",
+  itinerary: "Itinerary",
+  complete: "Plan complete",
 };
 
 const toolLabels: Record<string, string> = {
@@ -102,6 +112,8 @@ function itemTitle(item: ActivityItem) {
   const { event } = item;
   const tool = stringData(event, "tool") ?? stringData(item.started ?? event, "tool");
   if (tool) return toolLabels[tool] ?? tool.replaceAll("_", " ");
+  const goal = stringData(event, "goal");
+  if (goal) return goalLabels[goal] ?? "Planning stage";
   if (event.type === "run.started") return "Request received";
   if (event.type === "run.completed") return "Response completed";
   if (event.type === "run.paused") return "Waiting for your choices";
@@ -119,6 +131,14 @@ function itemDetail(item: ActivityItem) {
   const duration = typeof event.data.duration_ms === "number" ? event.data.duration_ms : undefined;
   const firstToken = typeof event.data.first_token_ms === "number" ? event.data.first_token_ms : undefined;
   const outputTokens = typeof event.data.output_tokens === "number" ? event.data.output_tokens : undefined;
+  const goal = stringData(event, "goal");
+  const goalStatus = stringData(event, "goal_status");
+  if (goal) {
+    if (goalStatus === "completed") return "This planning stage is complete.";
+    if (goalStatus === "skipped") return "This stage is not needed for your trip.";
+    if (goalStatus === "blocked") return "This stage needs another choice before continuing.";
+    return event.message;
+  }
   if (event.type === "tool.failed") return stringData(event, "error") ?? "The tool could not finish.";
   if (query && duration !== undefined) return `Searched “${query}” · ${formatDuration(duration)}`;
   if (query) return `Searching for “${query}”`;
@@ -134,6 +154,10 @@ function itemDetail(item: ActivityItem) {
 }
 
 function itemState(event: RunEvent, busy: boolean) {
+  const goalStatus = stringData(event, "goal_status");
+  if (goalStatus === "blocked") return "failed";
+  if (goalStatus === "completed" || goalStatus === "skipped") return "completed";
+  if (goalStatus === "in_progress" && !busy) return "paused";
   if (event.type === "tool.failed" || event.type === "run.failed") return "failed";
   if (event.type === "tool.completed" || event.type === "agent.completed" || event.type === "run.completed") return "completed";
   if (event.type === "run.paused") return "paused";

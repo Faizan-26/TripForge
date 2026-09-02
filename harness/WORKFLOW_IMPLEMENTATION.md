@@ -1,6 +1,6 @@
 # TripForge deterministic workflow implementation
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 ## Objective
 
@@ -24,11 +24,11 @@ or exposed.
 - [x] Add model-facing workflow update fields and controller directives.
 - [x] Persist workflow state with conversation messages in Supabase JSON metadata.
 - [x] Carry workflow state through the backend and frontend clarification contract.
-- [ ] Enforce a grounded hotel-selection gate before itinerary generation.
-- [ ] Enforce historical-place evidence when that goal applies.
-- [ ] Automatically advance when model questions are all already answered.
-- [ ] Expose safe goal progress in the frontend activity UI.
-- [ ] Add regression coverage for multi-round planning and hotel-card selection.
+- [x] Enforce a grounded hotel-selection gate before itinerary generation.
+- [x] Enforce historical-place evidence when that goal applies.
+- [x] Automatically advance when model questions are all already answered.
+- [x] Expose safe goal progress in the frontend activity UI.
+- [x] Add regression coverage for multi-round planning and hotel-card selection.
 - [ ] Update deployment and operational documentation.
 
 ## Decisions
@@ -63,11 +63,29 @@ or exposed.
 - Next: enforce workflow violations at runtime without surfacing a generic error,
   then publish safe goal transitions as frontend activity events.
 
+### 2026-09-02 - Phase 2 completed
+
+- Added typed hotel and historical-place evidence to session place storage.
+- Enforced stage gates in `submit_trip_response`: hotel selection requires a
+  successful hotel search and grounded hotel cards; historical-place planning
+  requires successful historical-place evidence.
+- Reject repeated clarification questions whose stable IDs are already answered.
+  The Harness receives the validation error and gets one bounded recovery attempt
+  within the same run instead of returning a broken terminal response.
+- Added safe workflow goal/status progress events for the frontend. These expose
+  product stages and tool activity, never private chain-of-thought.
+- Documented the implemented topology, plugins, request lifecycle, persistence,
+  security boundaries, and the reasons behind the design in `ARCHITECTURE.md`.
+- Added focused tests for evidence gates, repeated-question rejection, terminal
+  recovery, progress sanitization, persistence, and frontend contract handling.
+- Next: document environment/runtime operations, add a repeatable manual smoke-test
+  checklist, and run that checklist against the owner's local provider account.
+
 ## Verification log
 
-- `harness`: `npm.cmd test` - 54 passed.
+- `harness`: `node --test --test-reporter=dot` - 57 passed.
 - `frontend`: `npm.cmd run lint` - passed.
-- `backend`: focused Supabase/schema/run-manager/Harness tests - 30 passed.
+- `backend`: focused Supabase/schema/run-manager/Harness tests - 31 passed.
 - Full backend suite: 78 passed and 6 failed. Three API tests selected the live
   Harness runtime from local environment configuration and timed out during the
   isolated test; three legacy LangGraph supervisor assertions fail independently
